@@ -1,0 +1,2 @@
+DBLP: J. Yang and J. Leskovec. Defining and Evaluating Network Communities based on Ground-truth. ICDM, 2012.
+Cisco:  A Dataset of Networks of Computing Hosts, by Omid Madani, Sai Ankith Averineni, Shashidhar Gandham, IWSPA 2022
