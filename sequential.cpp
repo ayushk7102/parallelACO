@@ -11,8 +11,8 @@
 #include <algorithm>
 #include <sstream>
 #include <chrono>
-// #include <omp.h>
-#include "/opt/homebrew/Cellar/libomp/20.1.2/include/omp.h"
+#include <omp.h>
+// #include "/opt/homebrew/Cellar/libomp/20.1.2/include/omp.h"
 
 class Graph {
 private:
@@ -164,6 +164,26 @@ public:
         std::cout << "Graph loaded successfully!" << std::endl;
         std::cout << "Nodes: " << numNodes << ", Edges: " << numEdges / 2 << std::endl;
         // Note: numEdges is divided by 2 because we count each edge twice (once in each direction)
+    }
+
+    void saveGraph(const std::string& filename) {
+        std::ofstream file(filename);
+        if (!file.is_open()) {
+            std::cerr << "Failed to open file for writing: " << filename << std::endl;
+            return;
+        }
+        
+
+        file << "Graph adjacency list:" << std::endl;
+        for (const auto& pair : adjList) {
+            file << pair.first << " -> ";
+            for (int neighbor : pair.second) {
+                file << neighbor << " ";
+            }
+            file << std::endl;
+        }
+
+        file.close();
     }
 
     void printGraph() {
@@ -568,9 +588,10 @@ void printCommunities(const std::unordered_map<int, std::set<int>>& communities)
     }
 }
 
+
 // Save community structure to file
 void saveCommunities(const std::unordered_map<int, std::set<int>>& communities, const std::string& filename) {
-    std::ofstream file(filename);
+    std::ofstream file(filename, std::ios::app); // appending 
     if (!file.is_open()) {
         std::cerr << "Failed to open file for writing: " << filename << std::endl;
         return;
@@ -604,6 +625,13 @@ Graph loadFootballGraph(){
     
     graph.loadFromFileGML(filename);
     return graph;
+}
+
+
+void saveResult(Graph graph, const std::unordered_map<int, std::set<int>>& communities, const std::string& filename) {
+    graph.saveGraph(filename);
+    saveCommunities(communities, filename);
+    std::cout<<"Saved graph and communities successfully. \n";
 }
 
 int main(int argc, char* argv[]) {
@@ -659,7 +687,6 @@ int main(int argc, char* argv[]) {
     
     // Save results
     std::string output_file = use_parallel ? "parallel_communities.txt" : "sequential_communities.txt";
-    saveCommunities(communities, output_file);
-    
+    saveResult(graph, communities, output_file); // save the graph and the communities
     return 0;
 }

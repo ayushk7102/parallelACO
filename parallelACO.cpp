@@ -154,8 +154,7 @@ void loadFromFileGML(const std::string& filename) {
 
         file.close();
         std::cout << "Graph loaded successfully!" << std::endl;
-        std::cout << "Nodes: " << numNodes << ", Edges: " << numEdges / 2 << std::endl;
-        // Note: numEdges is divided by 2 because we count each edge twice (once in each direction)
+        std::cout << "Nodes: " << numNodes << ", Edges: " << numEdges << std::endl;
     }
 
     void printGraph() {

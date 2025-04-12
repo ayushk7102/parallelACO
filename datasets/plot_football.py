@@ -30,6 +30,7 @@ for i, comm in enumerate(communities):
 # Get a list of colors for each community
 import matplotlib.cm as cm
 num_communities = len(communities)
+print("Ground truth num_communities: ", num_communities)
 colors = cm.rainbow(np.linspace(0, 1, num_communities))
 
 # Create a list of node colors based on their community
