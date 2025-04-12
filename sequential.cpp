@@ -31,6 +31,95 @@ public:
         numEdges++;
     }
 
+    void loadFromFileGML(const std::string& filename) {
+        std::ifstream file(filename);
+        if (!file.is_open()) {
+            std::cerr << "Failed to open file: " << filename << std::endl;
+            return;
+        }
+
+        std::string line;
+        bool inGraph = false;
+        bool inNode = false;
+        bool inEdge = false;
+        int currentNodeId = -1;
+        int sourceNode = -1;
+        int targetNode = -1;
+        
+        while (std::getline(file, line)) {
+            // Trim leading and trailing whitespace
+            line.erase(0, line.find_first_not_of(" \t"));
+            if (line.empty()) continue; // Skip empty lines
+            
+            // Parse GML format
+            if (line == "graph") {
+                continue;
+            } else if (line == "[") {
+                if (!inGraph) {
+                    inGraph = true;
+                    continue;
+                } else if (!inNode && !inEdge && line == "[") {
+                    // This is the beginning of a node or edge block
+                    continue;
+                }
+            } else if (line == "]") {
+                if (inNode) {
+                    inNode = false;
+                    currentNodeId = -1;
+                } else if (inEdge) {
+                    inEdge = false;
+                    if (sourceNode != -1 && targetNode != -1) {
+                        addEdge(sourceNode, targetNode);
+                        sourceNode = -1;
+                        targetNode = -1;
+                    }
+                } else if (inGraph) {
+                    inGraph = false;
+                }
+                continue;
+            }
+            
+            if (!inGraph) continue;
+            
+            // Check for node definition
+            if (line == "node") {
+                inNode = true;
+                continue;
+            }
+            
+            // Check for edge definition
+            if (line == "edge") {
+                inEdge = true;
+                continue;
+            }
+            
+            // Parse node ID
+            if (inNode && line.find("id ") == 0) {
+                std::istringstream iss(line.substr(3));
+                iss >> currentNodeId;
+                continue;
+            }
+            
+            // Parse edge source
+            if (inEdge && line.find("source ") == 0) {
+                std::istringstream iss(line.substr(7));
+                iss >> sourceNode;
+                continue;
+            }
+            
+            // Parse edge target
+            if (inEdge && line.find("target ") == 0) {
+                std::istringstream iss(line.substr(7));
+                iss >> targetNode;
+                continue;
+            }
+        }
+        
+        file.close();
+        std::cout << "Graph loaded successfully from GML!" << std::endl;
+        std::cout << "Nodes: " << numNodes << ", Edges: " << numEdges / 2 << std::endl;
+    }
+
     void loadFromFile(const std::string& filename) {
         std::ifstream file(filename);
         if (!file.is_open()) {
@@ -398,7 +487,7 @@ public:
     // Sequential version
     std::unordered_map<int, std::set<int>> run() {
         const auto& node_ids = graph.getNodeIDs();
-        int walk_steps = std::min(30, (int)(graph.getNumNodes() / 10));
+        int walk_steps = std::min(100, (int)(graph.getNumNodes() / 10));
         
         std::cout << "Running ACO with " << num_ants << " ants for " << max_iterations 
                   << " iterations, walk length: " << walk_steps << std::endl;
@@ -509,12 +598,20 @@ Graph loadDBLPGraph(){
 
 }
 
+Graph loadFootballGraph(){
+    Graph graph;
+    std::string filename = "datasets/football/football.gml";
+    
+    graph.loadFromFileGML(filename);
+    return graph;
+}
+
 int main(int argc, char* argv[]) {
     // Parse command line arguments (if any)
     int num_ants = 20;
     int num_iterations = 50;
     int num_threads = 4;
-    bool use_parallel = true;
+    bool use_parallel = false;
     
     if (argc > 1) num_ants = std::stoi(argv[1]);
     if (argc > 2) num_iterations = std::stoi(argv[2]);
@@ -523,7 +620,7 @@ int main(int argc, char* argv[]) {
     
     // Load graph
     std::cout << "Loading graph..." << std::endl;
-    Graph graph = loadDBLPGraph();
+    Graph graph = loadFootballGraph();
     
     std::cout << "\nRunning Edge-based ACO Community Detection with:" << std::endl;
     std::cout << "  - " << graph.getNumNodes() << " nodes" << std::endl;
