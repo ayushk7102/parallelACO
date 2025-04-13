@@ -357,7 +357,7 @@ private:
         }
     }
 
-    // Extract communities from pheromone-weighted graph
+        // Extract communities from pheromone-weighted graph
     std::unordered_map<int, std::set<int>> extractCommunities() {
         std::unordered_map<int, std::set<int>> communities;
         std::unordered_set<int> processed_nodes;
@@ -444,54 +444,57 @@ private:
         return total_pheromone / connections;
     }
 
-    // Calculate modularity of community structure
     double calculateModularity(const std::unordered_map<int, std::set<int>>& communities) {
-        const auto& adj_list = graph.getAdjList();
-        double m = graph.getNumEdges(); // Total number of edges
-        double q = 0.0;
+    const auto& adj_list = graph.getAdjList();
+    double m = graph.getNumEdges(); // Total number of edges
+    double q = 0.0;
+    
+    // Create mapping from node to community
+    std::unordered_map<int, int> node_community;
+    for (const auto& pair : communities) {
+        int community_id = pair.first;
+        for (int node : pair.second) {
+            node_community[node] = community_id;
+        }
+    }
+    
+    // Calculate degrees of each node
+    std::unordered_map<int, double> degrees;
+    for (const auto& pair : adj_list) {
+        int node = pair.first;
+        degrees[node] = pair.second.size();
+    }
+    
+    // For each edge in the network
+    for (const auto& pair : adj_list) {
+        int i = pair.first;
         
-        // Create mapping from node to community
-        std::unordered_map<int, int> node_community;
-        for (const auto& pair : communities) {
-            int community_id = pair.first;
-            for (int node : pair.second) {
-                node_community[node] = community_id;
-            }
+        if (node_community.find(i) == node_community.end()) {
+            continue; // Skip nodes not assigned to communities
         }
         
-        // Calculate degrees of each node
-        std::unordered_map<int, double> degrees;
-        for (const auto& pair : adj_list) {
-            int node = pair.first;
-            degrees[node] = pair.second.size();
-        }
+        int c_i = node_community[i];
         
-        // Calculate modularity
-        for (const auto& pair : adj_list) {
-            int i = pair.first;
-            
-            if (node_community.find(i) == node_community.end()) {
-                continue; // Skip nodes not assigned to communities
-            }
-            
-            int c_i = node_community[i];
-            
-            for (int j : pair.second) {
+        for (int j : pair.second) {
+            if (i < j) { // Process each edge only once
                 if (node_community.find(j) == node_community.end()) {
                     continue;
                 }
                 
                 int c_j = node_community[j];
                 
+                // Add contribution to modularity (positive if same community, negative otherwise)
+                double edge_contribution = 1.0 - (degrees[i] * degrees[j]) / (2.0 * m);
                 if (c_i == c_j) {
-                    q += 1.0 - (degrees[i] * degrees[j]) / (2.0 * m);
+                    q += edge_contribution;
                 }
             }
         }
-        
-        q /= (2.0 * m);
-        return q;
     }
+    
+    q /= (2.0 * m);
+    return q;
+}
 
 public:
     ACOCommunityDetection(const Graph& g, int ants = 20, int iterations = 100,

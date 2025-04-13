@@ -5,6 +5,9 @@ import matplotlib.pyplot as plt
 import networkx as nx
 from networkx.algorithms import community
 import numpy as np
+import ssl
+
+ssl._create_default_https_context = ssl._create_unverified_context
 
 url = "http://www-personal.umich.edu/~mejn/netdata/football.zip"
 sock = urllib.request.urlopen(url)  # open URL
