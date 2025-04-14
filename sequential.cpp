@@ -3,7 +3,6 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
-#include <unordered_set>
 #include <map>
 #include <set>
 #include <random>
@@ -11,7 +10,7 @@
 #include <algorithm>
 #include <sstream>
 #include <chrono>
-#include <omp.h>
+// #include <omp.h>
 // #include "/opt/homebrew/Cellar/libomp/20.1.2/include/omp.h"
 
 class Graph {
@@ -163,38 +162,6 @@ public:
         file.close();
         std::cout << "Graph loaded successfully!" << std::endl;
         std::cout << "Nodes: " << numNodes << ", Edges: " << numEdges / 2 << std::endl;
-        // Note: numEdges is divided by 2 because we count each edge twice (once in each direction)
-    }
-
-    void saveGraph(const std::string& filename) {
-        std::ofstream file(filename);
-        if (!file.is_open()) {
-            std::cerr << "Failed to open file for writing: " << filename << std::endl;
-            return;
-        }
-        
-
-        file << "Graph adjacency list:" << std::endl;
-        for (const auto& pair : adjList) {
-            file << pair.first << " -> ";
-            for (int neighbor : pair.second) {
-                file << neighbor << " ";
-            }
-            file << std::endl;
-        }
-
-        file.close();
-    }
-
-    void printGraph() {
-        std::cout << "Graph adjacency list:" << std::endl;
-        for (const auto& pair : adjList) {
-            std::cout << pair.first << " -> ";
-            for (int neighbor : pair.second) {
-                std::cout << neighbor << " ";
-            }
-            std::cout << std::endl;
-        }
     }
 
     int getNumNodes() const { return numNodes; }
@@ -212,339 +179,443 @@ public:
         }
         return nodes;
     }
-
-    // Additional methods for graph analysis can be added here
 };
 
-// Edge representation for pheromone storage
-struct Edge {
-    int from;
-    int to;
+// Structure to represent a solution (community assignment)
+struct Solution {
+    std::unordered_map<int, int> community; // node_id -> community_id
+    double modularity;
     
-    Edge(int f, int t) : from(std::min(f, t)), to(std::max(f, t)) {}
+    Solution() : modularity(0.0) {}
     
-    bool operator==(const Edge& other) const {
-        return from == other.from && to == other.to;
+    // Initialize solution with each node in its own community
+    explicit Solution(const std::vector<int>& nodes) : modularity(0.0) {
+        for (int node : nodes) {
+            community[node] = node; // Initially node ID is community ID
+        }
     }
 };
 
-// Hash function for Edge
-namespace std {
-    template <>
-    struct hash<Edge> {
-        size_t operator()(const Edge& e) const {
-            return hash<int>()(e.from) ^ (hash<int>()(e.to) << 1);
-        }
-    };
-}
-
-
-
-class ACOCommunityDetection {
+class NodeCommunityACO {
 private:
     const Graph& graph;
     int num_ants;
     int max_iterations;
-    double alpha;           // Pheromone influence
-    double beta;            // Heuristic influence
-    double rho;             // Evaporation rate
-    double initial_pheromone;
-    double similarity_threshold; // Threshold for community membership
+    double alpha;     // Pheromone influence
+    double beta;      // Heuristic influence
+    double rho;       // Evaporation rate
+    double q0;        // Probability of exploitation vs exploration
     
-    // Pheromone on edges
-    std::unordered_map<Edge, double> pheromones;
-
-    // Store original edge weights (all 1.0 for unweighted graph)
-    std::unordered_map<Edge, double> edge_weights;
-
+    // Pheromone matrix: pheromone[node][community] = pheromone level
+    std::unordered_map<int, std::unordered_map<int, double>> pheromones;
+    
+    // Best solution found so far
+    Solution best_solution;
+    
     // Random number generator
     std::mt19937 rng;
     std::uniform_real_distribution<double> dist;
-
-    // Initialize pheromones on all edges
+    
+    // Initialize pheromone values
     void initializePheromones() {
-        const auto& adj_list = graph.getAdjList();
+        std::vector<int> nodes = graph.getNodeIDs();
+        double initial_pheromone = 1.0 / nodes.size();
         
-        for (const auto& pair : adj_list) {
-            int from = pair.first;
-            for (int to : pair.second) {
-                if (from < to) { // Only process each edge once
-                    Edge edge(from, to);
-                    pheromones[edge] = initial_pheromone;
-                    edge_weights[edge] = 1.0; // Initial weight (could be modified for weighted graphs)
-                }
+        for (int node : nodes) {
+            for (int possible_community : nodes) {
+                pheromones[node][possible_community] = initial_pheromone;
             }
         }
     }
-
-    // Perform a random walk with an ant
-    std::vector<int> antRandomWalk(int start_node, int steps) {
-        const auto& adj_list = graph.getAdjList();
-        std::vector<int> path;
-        int current_node = start_node;
-        path.push_back(current_node);
+    
+    // Print statistics about the pheromone matrix
+    void printPheromoneStats() {
+        double min_val = std::numeric_limits<double>::max();
+        double max_val = 0.0;
+        double sum = 0.0;
+        int count = 0;
         
-        for (int step = 0; step < steps; step++) {
-            // Get neighbors of current node
-            if (adj_list.find(current_node) == adj_list.end() || adj_list.at(current_node).empty()) {
-                break; // No neighbors to visit
+        for (const auto& node_map : pheromones) {
+            for (const auto& comm_val : node_map.second) {
+                min_val = std::min(min_val, comm_val.second);
+                max_val = std::max(max_val, comm_val.second);
+                sum += comm_val.second;
+                count++;
             }
-            
-            const auto& neighbors = adj_list.at(current_node);
-            
-            // Calculate probabilities based on pheromone levels and heuristic information
-            std::vector<double> probabilities;
-            double total = 0.0;
-            
-            for (int neighbor : neighbors) {
-                Edge edge(current_node, neighbor);
-                double pheromone = pheromones[edge];
-                double weight = edge_weights[edge];
-                double probability = std::pow(pheromone, alpha) * std::pow(weight, beta);
-                probabilities.push_back(probability);
-                total += probability;
-            }
-            
-            // Normalize probabilities
-            if (total > 0) {
-                for (auto& p : probabilities) {
-                    p /= total;
-                }
-            } else {
-                // If all probabilities are zero, use uniform distribution
-                for (auto& p : probabilities) {
-                    p = 1.0 / neighbors.size();
-                }
-            }
-            
-            // Select next node using roulette wheel selection
-            double r = dist(rng);
-            double cumulative = 0.0;
-            int next_node = neighbors[0]; // Default
-            
-            for (size_t i = 0; i < neighbors.size(); i++) {
-                cumulative += probabilities[i];
-                if (r <= cumulative) {
-                    next_node = neighbors[i];
-                    break;
-                }
-            }
-            
-            current_node = next_node;
-            path.push_back(current_node);
         }
         
-        return path;
+        double avg = count > 0 ? sum / count : 0.0;
+        
+        std::cout << "Pheromone matrix stats:" << std::endl;
+        std::cout << "  Min: " << min_val << std::endl;
+        std::cout << "  Max: " << max_val << std::endl;
+        std::cout << "  Avg: " << avg << std::endl;
+        std::cout << "  Total entries: " << count << std::endl;
     }
-
-    // Update pheromones based on ant walks
-    void updatePheromones(const std::vector<std::vector<int>>& ant_paths) {
-        // Evaporation
-        for (auto& pair : pheromones) {
-            pair.second *= (1.0 - rho);
-        }
-        
-        // Deposit new pheromones based on paths
-        for (const auto& path : ant_paths) {
-            // Calculate path quality (e.g., based on how much it stays within communities)
-            // For now we use a simple reinforcement approach where each visited edge gets a fixed deposit
-            double deposit = 1.0 / path.size();
-            
-            for (size_t i = 0; i < path.size() - 1; i++) {
-                Edge edge(path[i], path[i + 1]);
-                pheromones[edge] += deposit;
-            }
-        }
-    }
-
-        // Extract communities from pheromone-weighted graph
-    std::unordered_map<int, std::set<int>> extractCommunities() {
-        std::unordered_map<int, std::set<int>> communities;
-        std::unordered_set<int> processed_nodes;
-        const auto& adj_list = graph.getAdjList();
-        
-        // Process each node that hasn't been assigned to a community yet
-        for (const auto& pair : adj_list) {
-            int node = pair.first;
-            
-            if (processed_nodes.find(node) != processed_nodes.end()) {
-                continue; // Skip if already processed
-            }
-            
-            // Start a new community with this node
-            int community_id = node;
-            std::set<int> community;
-            community.insert(node);
-            processed_nodes.insert(node);
-            
-            // Queue for nodes to be considered
-            std::vector<int> queue;
-            queue.push_back(node);
-            
-            // Process queue
-            while (!queue.empty()) {
-                int current = queue.front();
-                queue.erase(queue.begin());
-                
-                // Check all neighbors
-                if (adj_list.find(current) != adj_list.end()) {
-                    for (int neighbor : adj_list.at(current)) {
-                        if (processed_nodes.find(neighbor) != processed_nodes.end()) {
-                            continue; // Skip if already processed
-                        }
-                        
-                        // Calculate similarity to community
-                        double similarity = calculateSimilarity(neighbor, community);
-                        
-                        // Add to community if similarity is above threshold
-                        if (similarity >= similarity_threshold) {
-                            community.insert(neighbor);
-                            processed_nodes.insert(neighbor);
-                            queue.push_back(neighbor);
-                        }
-                    }
-                }
-            }
-            
-            // Store community
-            if (!community.empty()) {
-                communities[community_id] = community;
-            }
-        }
-        
-        return communities;
-    }
-
-    // Calculate similarity of a node to a community based on pheromone levels
-    double calculateSimilarity(int node, const std::set<int>& community) {
+    
+    // Calculate how many connections node has to a given community
+    int connectionsToCommunity(int node, int community_id, const Solution& solution) {
         const auto& adj_list = graph.getAdjList();
         
         if (adj_list.find(node) == adj_list.end()) {
-            return 0.0; // No connections
+            return 0;
         }
         
-        double total_pheromone = 0.0;
         int connections = 0;
-        
-        // Sum pheromones on edges to community members
         for (int neighbor : adj_list.at(node)) {
-            if (community.find(neighbor) != community.end()) {
-                Edge edge(node, neighbor);
-                total_pheromone += pheromones[edge];
+            if (solution.community.find(neighbor) != solution.community.end() && 
+                solution.community.at(neighbor) == community_id) {
                 connections++;
             }
         }
         
-        // If no connections to community, similarity is 0
-        if (connections == 0) {
-            return 0.0;
-        }
-        
-        // Average pheromone level
-        return total_pheromone / connections;
-    }
-
-    double calculateModularity(const std::unordered_map<int, std::set<int>>& communities) {
-    const auto& adj_list = graph.getAdjList();
-    double m = graph.getNumEdges(); // Total number of edges
-    double q = 0.0;
-    
-    // Create mapping from node to community
-    std::unordered_map<int, int> node_community;
-    for (const auto& pair : communities) {
-        int community_id = pair.first;
-        for (int node : pair.second) {
-            node_community[node] = community_id;
-        }
+        return connections;
     }
     
-    // Calculate degrees of each node
-    std::unordered_map<int, double> degrees;
-    for (const auto& pair : adj_list) {
-        int node = pair.first;
-        degrees[node] = pair.second.size();
-    }
-    
-    // For each edge in the network
-    for (const auto& pair : adj_list) {
-        int i = pair.first;
+    // Construct a solution using ant colony principles
+    Solution constructSolution(int ant_id) {
+        std::vector<int> nodes = graph.getNodeIDs();
+        Solution solution(nodes);
+        const auto& adj_list = graph.getAdjList();
         
-        if (node_community.find(i) == node_community.end()) {
-            continue; // Skip nodes not assigned to communities
-        }
+        // Shuffle nodes to process them in random order
+        std::shuffle(nodes.begin(), nodes.end(), rng);
         
-        int c_i = node_community[i];
-        
-        for (int j : pair.second) {
-            if (i < j) { // Process each edge only once
-                if (node_community.find(j) == node_community.end()) {
-                    continue;
+        // First ant uses initial solution, others construct new ones
+        if (ant_id > 0) {
+            // For each node, decide which community to join
+            for (int node : nodes) {
+                // Get potential communities (start with all neighbors' communities)
+                std::set<int> potential_communities;
+                potential_communities.insert(node); // Own community is always an option
+                
+                if (adj_list.find(node) != adj_list.end()) {
+                    for (int neighbor : adj_list.at(node)) {
+                        potential_communities.insert(solution.community[neighbor]);
+                    }
                 }
                 
-                int c_j = node_community[j];
+                // Decide whether to exploit or explore
+                double q = dist(rng);
                 
-                // Add contribution to modularity (positive if same community, negative otherwise)
-                double edge_contribution = 1.0 - (degrees[i] * degrees[j]) / (2.0 * m);
-                if (c_i == c_j) {
-                    q += edge_contribution;
+                if (q < q0) {
+                    // Exploitation: choose best community by deterministic rule
+                    int best_community = node;
+                    double best_value = 0.0;
+                    
+                    for (int comm : potential_communities) {
+                        // Pheromone level
+                        double pheromone = pheromones[node][comm];
+                        
+                        // Heuristic: number of connections to community
+                        int connections = connectionsToCommunity(node, comm, solution);
+                        double heuristic = std::max(0.1, static_cast<double>(connections));
+                        
+                        // Combined value using ACO formula
+                        double value = std::pow(pheromone, alpha) * std::pow(heuristic, beta);
+                        
+                        if (value > best_value) {
+                            best_value = value;
+                            best_community = comm;
+                        }
+                    }
+                    
+                    // Assign node to the best community
+                    solution.community[node] = best_community;
+                }
+                else {
+                    // Exploration: probabilistic choice
+                    std::vector<int> communities;
+                    std::vector<double> probabilities;
+                    double total = 0.0;
+                    
+                    for (int comm : potential_communities) {
+                        // Pheromone level
+                        double pheromone = pheromones[node][comm];
+                        
+                        // Heuristic: number of connections to community
+                        int connections = connectionsToCommunity(node, comm, solution);
+                        double heuristic = std::max(0.1, static_cast<double>(connections));
+                        
+                        // Combined value using ACO formula
+                        double value = std::pow(pheromone, alpha) * std::pow(heuristic, beta);
+                        
+                        communities.push_back(comm);
+                        probabilities.push_back(value);
+                        total += value;
+                    }
+                    
+                    // Normalize probabilities
+                    if (total > 0) {
+                        for (auto& p : probabilities) {
+                            p /= total;
+                        }
+                    }
+                    else {
+                        // If all values are zero, use uniform distribution
+                        for (auto& p : probabilities) {
+                            p = 1.0 / probabilities.size();
+                        }
+                    }
+                    
+                    // Select community using roulette wheel selection
+                    double r = dist(rng);
+                    double cumulative = 0.0;
+                    int selected_community = communities[0];
+                    
+                    for (size_t i = 0; i < communities.size(); i++) {
+                        cumulative += probabilities[i];
+                        if (r <= cumulative) {
+                            selected_community = communities[i];
+                            break;
+                        }
+                    }
+                    
+                    // Assign node to the selected community
+                    solution.community[node] = selected_community;
+                }
+            }
+        }
+        
+        // Apply local search to improve the solution
+        // solution = localSearch(solution);
+        
+        // Calculate solution modularity
+        solution.modularity = calculateModularity(solution);
+        
+        return solution;
+    }
+    
+    // Local search to improve a solution
+    Solution localSearch(Solution solution) {
+        const auto& adj_list = graph.getAdjList();
+        std::vector<int> nodes = graph.getNodeIDs();
+        bool improved = true;
+        
+        while (improved) {
+            improved = false;
+            
+            // Try to move each node to a better community
+            for (int node : nodes) {
+                int current_community = solution.community[node];
+                std::set<int> neighbor_communities;
+                neighbor_communities.insert(current_community);
+                
+                // Get communities of neighbors
+                if (adj_list.find(node) != adj_list.end()) {
+                    for (int neighbor : adj_list.at(node)) {
+                        neighbor_communities.insert(solution.community[neighbor]);
+                    }
+                }
+                
+                // Get current modularity
+                double current_modularity = calculateModularity(solution);
+                
+                // Try each neighboring community
+                int best_community = current_community;
+                double best_modularity = current_modularity;
+                
+                for (int comm : neighbor_communities) {
+                    if (comm == current_community) continue;
+                    
+                    // Temporarily move node to this community
+                    int original_community = solution.community[node];
+                    solution.community[node] = comm;
+                    
+                    // Calculate new modularity
+                    double new_modularity = calculateModularity(solution);
+                    
+                    // If better, remember this community
+                    if (new_modularity > best_modularity) {
+                        best_modularity = new_modularity;
+                        best_community = comm;
+                    }
+                    
+                    // Restore original community
+                    solution.community[node] = original_community;
+                }
+                
+                // If a better community was found, move the node
+                if (best_community != current_community) {
+                    solution.community[node] = best_community;
+                    solution.modularity = best_modularity;
+                    improved = true;
+                }
+            }
+        }
+        
+        return solution;
+    }
+    
+    // Update pheromone levels based on solutions
+    void updatePheromones(const std::vector<Solution>& solutions) {
+        // Evaporation
+        for (auto& node_map : pheromones) {
+            for (auto& comm_val : node_map.second) {
+                comm_val.second *= (1.0 - rho);
+            }
+        }
+        
+        // Add new pheromones based on solution quality
+        for (const auto& solution : solutions) {
+            double delta = solution.modularity; // Use modularity as deposit amount
+            
+            // For each node-community assignment in the solution
+            for (const auto& pair : solution.community) {
+                int node = pair.first;
+                int comm = pair.second;
+                
+                // Add pheromone proportional to solution quality
+                pheromones[node][comm] += delta;
+            }
+        }
+        
+        // Normalize pheromone values to prevent extreme differences
+        double max_pheromone = 0.0;
+        for (const auto& node_map : pheromones) {
+            for (const auto& comm_val : node_map.second) {
+                max_pheromone = std::max(max_pheromone, comm_val.second);
+            }
+        }
+        
+        if (max_pheromone > 10.0) {
+            double scale_factor = 5.0 / max_pheromone;
+            for (auto& node_map : pheromones) {
+                for (auto& comm_val : node_map.second) {
+                    comm_val.second *= scale_factor;
                 }
             }
         }
     }
     
-    q /= (2.0 * m);
-    return q;
-}
+    // Calculate modularity of a solution
+    double calculateModularity(const Solution& solution) {
+        const auto& adj_list = graph.getAdjList();
+        double m = graph.getNumEdges(); // Total number of edges
+        double q = 0.0;
+        
+        // Calculate the sum of degrees for each community
+        std::unordered_map<int, double> community_degrees;
+        for (const auto& pair : adj_list) {
+            int node = pair.first;
+            
+            if (solution.community.find(node) == solution.community.end()) {
+                continue; // Skip nodes not in solution
+            }
+            
+            int comm = solution.community.at(node);
+            if (community_degrees.find(comm) == community_degrees.end()) {
+                community_degrees[comm] = 0.0;
+            }
+            community_degrees[comm] += pair.second.size();
+        }
+        
+        // For each edge
+        for (const auto& pair : adj_list) {
+            int i = pair.first;
+            
+            if (solution.community.find(i) == solution.community.end()) {
+                continue;
+            }
+            
+            int c_i = solution.community.at(i);
+            
+            for (int j : pair.second) {
+                // Process each edge once (for undirected graph)
+                if (i < j) {
+                    if (solution.community.find(j) == solution.community.end()) {
+                        continue;
+                    }
+                    
+                    int c_j = solution.community.at(j);
+                    
+                    // Same community contribution
+                    if (c_i == c_j) {
+                        double expected = (pair.second.size() * adj_list.at(j).size()) / (2.0 * m);
+                        q += 1.0 - expected;
+                    }
+                }
+            }
+        }
+        
+        q /= (2.0 * m);
+        return q;
+    }
+    
+    // Convert solution to community map format
+    std::unordered_map<int, std::set<int>> convertToCommunityMap(const Solution& solution) {
+        std::unordered_map<int, std::set<int>> result;
+        
+        for (const auto& pair : solution.community) {
+            int node = pair.first;
+            int comm = pair.second;
+            
+            if (result.find(comm) == result.end()) {
+                result[comm] = std::set<int>();
+            }
+            
+            result[comm].insert(node);
+        }
+        
+        return result;
+    }
 
 public:
-    ACOCommunityDetection(const Graph& g, int ants = 20, int iterations = 100,
-                              double a = 1.0, double b = 0.5, double r = 0.1, 
-                              double init_pheromone = 1.0, double sim_threshold = 0.5)
+    NodeCommunityACO(const Graph& g, int ants = 20, int iterations = 100, 
+                     double a = 1.0, double b = 2.0, double r = 0.1, double q = 0.9)
         : graph(g), num_ants(ants), max_iterations(iterations),
-          alpha(a), beta(b), rho(r), initial_pheromone(init_pheromone),
-          similarity_threshold(sim_threshold),
+          alpha(a), beta(b), rho(r), q0(q), 
           rng(std::random_device{}()), dist(0.0, 1.0) {
-        initializePheromones();
-    }
-
-    // Sequential version
-    std::unordered_map<int, std::set<int>> run() {
-        const auto& node_ids = graph.getNodeIDs();
-        int walk_steps = std::min(100, (int)(graph.getNumNodes() / 10));
         
-        std::cout << "Running ACO with " << num_ants << " ants for " << max_iterations 
-                  << " iterations, walk length: " << walk_steps << std::endl;
+        initializePheromones();
+        best_solution = Solution(graph.getNodeIDs());
+        best_solution.modularity = calculateModularity(best_solution);
+    }
+    
+    std::unordered_map<int, std::set<int>> run() {
+        std::cout << "Running Node-Community ACO with:" << std::endl;
+        std::cout << "  - " << num_ants << " ants" << std::endl;
+        std::cout << "  - " << max_iterations << " iterations" << std::endl;
+        std::cout << "  - Alpha (pheromone influence): " << alpha << std::endl;
+        std::cout << "  - Beta (heuristic influence): " << beta << std::endl;
+        std::cout << "  - Rho (evaporation rate): " << rho << std::endl;
+        std::cout << "  - q0 (exploitation probability): " << q0 << std::endl;
         
         for (int iter = 0; iter < max_iterations; iter++) {
-            std::vector<std::vector<int>> ant_paths;
+            std::vector<Solution> ant_solutions(num_ants);
             
-            // Each ant performs a random walk
+            // Each ant constructs a solution
             for (int ant = 0; ant < num_ants; ant++) {
-                // Select random starting node
-                int start_node = node_ids[dist(rng) * node_ids.size()];
+                ant_solutions[ant] = constructSolution(ant);
                 
-                // Perform random walk
-                std::vector<int> path = antRandomWalk(start_node, walk_steps);
-                ant_paths.push_back(path);
+                // Update best solution if improved
+                if (ant_solutions[ant].modularity > best_solution.modularity) {
+                    best_solution = ant_solutions[ant];
+                }
             }
             
-            // Update pheromones
-            updatePheromones(ant_paths);
+            // Update pheromones based on solutions
+            updatePheromones(ant_solutions);
             
-            if (iter % 10 == 0 || iter == max_iterations - 1) {
-                // Extract communities and calculate modularity periodically
-                auto communities = extractCommunities();
-                double modularity = calculateModularity(communities);
-                std::cout << "Iteration " << iter << ": " << communities.size()
-                          << " communities, modularity = " << modularity << std::endl;
+            // Print progress every 10 iterations or at the end
+            if (iter % 1 == 0 || iter == max_iterations - 1) {
+                // Convert the current best solution to community format
+                auto communities = convertToCommunityMap(best_solution);
+                
+                std::cout << "Iteration " << iter << ": " 
+                          << communities.size() << " communities, "
+                          << "modularity = " << best_solution.modularity << std::endl;
+                
+                if (iter % 50 == 0) {
+                    printPheromoneStats();
+                }
             }
         }
         
-        // Final community extraction
-        auto communities = extractCommunities();
-        double modularity = calculateModularity(communities);
+        // Final result
+        auto communities = convertToCommunityMap(best_solution);
         std::cout << "Final result: " << communities.size() 
-                  << " communities, modularity = " << modularity << std::endl;
+                  << " communities, modularity = " << best_solution.modularity << std::endl;
         
         return communities;
     }
@@ -563,7 +634,7 @@ void printCommunities(const std::unordered_map<int, std::set<int>>& communities)
     
     std::cout << "Detected " << communities.size() << " communities:" << std::endl;
     
-    // Print top 10 communities
+    // Print all communities, or top 10 if there are many
     int count = 0;
     for (const auto& pair : sorted_communities) {
         std::cout << "Community " << pair.first << " (size: " << pair.second.size() << "): ";
@@ -591,10 +662,9 @@ void printCommunities(const std::unordered_map<int, std::set<int>>& communities)
     }
 }
 
-
 // Save community structure to file
 void saveCommunities(const std::unordered_map<int, std::set<int>>& communities, const std::string& filename) {
-    std::ofstream file(filename, std::ios::app); // appending 
+    std::ofstream file(filename);
     if (!file.is_open()) {
         std::cerr << "Failed to open file for writing: " << filename << std::endl;
         return;
@@ -613,16 +683,53 @@ void saveCommunities(const std::unordered_map<int, std::set<int>>& communities, 
     std::cout << "Community structure saved to: " << filename << std::endl;
 }
 
-Graph loadDBLPGraph(){
-    Graph graph;
-    std::string filename = "datasets/DBLP/com-dblp.ungraph.txt";
+void saveGraphWithCommunities(const Graph& graph, const std::unordered_map<int, std::set<int>>& communities, const std::string& filename) {
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Failed to open file for writing: " << filename << std::endl;
+        return;
+    }
     
-    graph.loadFromFile(filename);
-    return graph;
-
+    // Create a mapping from node to community
+    std::unordered_map<int, int> node_to_community;
+    for (const auto& pair : communities) {
+        int community_id = pair.first;
+        for (int node : pair.second) {
+            node_to_community[node] = community_id;
+        }
+    }
+    
+    // Save adjacency list with community assignments
+    const auto& adj_list = graph.getAdjList();
+    
+    file << "Graph adjacency list:" << std::endl;
+    for (const auto& pair : adj_list) {
+        int node = pair.first;
+        file << node << " -> ";
+        for (int neighbor : pair.second) {
+            file << neighbor << " ";
+        }
+        file << std::endl;
+    }
+    
+    // Save community assignments
+    file << "# Community_ID Size Nodes" << std::endl;
+    for (const auto& pair : communities) {
+        int community_id = pair.first;
+        const auto& members = pair.second;
+        
+        file << community_id << " " << members.size() << " ";
+        for (int node : members) {
+            file << node << " ";
+        }
+        file << std::endl;
+    }
+    
+    file.close();
+    std::cout << "Graph with communities saved to: " << filename << std::endl;
 }
 
-Graph loadFootballGraph(){
+Graph loadFootballGraph() {
     Graph graph;
     std::string filename = "datasets/football/football.gml";
     
@@ -630,66 +737,47 @@ Graph loadFootballGraph(){
     return graph;
 }
 
-
-void saveResult(Graph graph, const std::unordered_map<int, std::set<int>>& communities, const std::string& filename) {
-    graph.saveGraph(filename);
-    saveCommunities(communities, filename);
-    std::cout<<"Saved graph and communities successfully. \n";
-}
-
 int main(int argc, char* argv[]) {
-    // Parse command line arguments (if any)
-    int num_ants = 20;
-    int num_iterations = 50;
-    int num_threads = 4;
-    bool use_parallel = false;
+    // Parse command line arguments
+    int num_ants = 30;
+    int num_iterations = 200;
+    double alpha = 1.0;
+    double beta = 2.0;
+    double rho = 0.1;
+    double q0 = 0.9;
     
     if (argc > 1) num_ants = std::stoi(argv[1]);
     if (argc > 2) num_iterations = std::stoi(argv[2]);
-    if (argc > 3) num_threads = std::stoi(argv[3]);
-    if (argc > 4) use_parallel = std::stoi(argv[4]) != 0;
+    if (argc > 3) alpha = std::stod(argv[3]);
+    if (argc > 4) beta = std::stod(argv[4]);
+    if (argc > 5) rho = std::stod(argv[5]);
+    if (argc > 6) q0 = std::stod(argv[6]);
     
     // Load graph
     std::cout << "Loading graph..." << std::endl;
     Graph graph = loadFootballGraph();
     
-    std::cout << "\nRunning Edge-based ACO Community Detection with:" << std::endl;
-    std::cout << "  - " << graph.getNumNodes() << " nodes" << std::endl;
-    std::cout << "  - " << graph.getNumEdges() << " edges" << std::endl;
-    std::cout << "  - " << num_ants << " ants" << std::endl;
-    std::cout << "  - " << num_iterations << " iterations" << std::endl;
-    if (use_parallel) {
-        std::cout << "  - " << num_threads << " threads (parallel execution)" << std::endl;
-    } else {
-        std::cout << "  - Sequential execution" << std::endl;
-    }
-    
     // Create ACO algorithm
-    ACOCommunityDetection aco(graph, num_ants, num_iterations);
+    NodeCommunityACO aco(graph, num_ants, num_iterations, alpha, beta, rho, q0);
     
     // Get start time
     auto start_time = std::chrono::high_resolution_clock::now();
     
     // Run ACO
-    std::unordered_map<int, std::set<int>> communities;
-    if (use_parallel) {
-        // communities = aco.runParallel(num_threads);
-    } else {
-        communities = aco.run();
-    }
+    std::unordered_map<int, std::set<int>> communities = aco.run();
     
     // Get end time
     auto end_time = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed = end_time - start_time;
     
-    std::cout << "\nACO Community Detection completed in " 
+    std::cout << "\nNode-Community ACO completed in " 
               << elapsed.count() << " seconds" << std::endl;
     
     // Print communities
     printCommunities(communities);
     
     // Save results
-    std::string output_file = use_parallel ? "parallel_communities.txt" : "sequential_communities.txt";
-    saveResult(graph, communities, output_file); // save the graph and the communities
+    saveGraphWithCommunities(graph, communities, "sequential_communities.txt");
+    
     return 0;
 }
