@@ -220,11 +220,13 @@ private:
     void initializePheromones() {
         std::vector<int> nodes = graph.getNodeIDs();
         double initial_pheromone = 1.0 / nodes.size();
-        
         for (int node : nodes) {
             for (int possible_community : nodes) {
                 pheromones[node][possible_community] = initial_pheromone;
             }
+            // if(node % 1000 == 0) {
+            //     std::cout<<"on node: "<<node<<"\n";
+            // }
         }
     }
     
@@ -382,68 +384,6 @@ private:
         
         // Calculate solution modularity
         solution.modularity = calculateModularity(solution);
-        
-        return solution;
-    }
-    
-    // Local search to improve a solution
-    Solution localSearch(Solution solution) {
-        const auto& adj_list = graph.getAdjList();
-        std::vector<int> nodes = graph.getNodeIDs();
-        bool improved = true;
-        
-        while (improved) {
-            improved = false;
-            
-            // Try to move each node to a better community
-            for (int node : nodes) {
-                int current_community = solution.community[node];
-                std::set<int> neighbor_communities;
-                neighbor_communities.insert(current_community);
-                
-                // Get communities of neighbors
-                if (adj_list.find(node) != adj_list.end()) {
-                    for (int neighbor : adj_list.at(node)) {
-                        neighbor_communities.insert(solution.community[neighbor]);
-                    }
-                }
-                
-                // Get current modularity
-                double current_modularity = calculateModularity(solution);
-                
-                // Try each neighboring community
-                int best_community = current_community;
-                double best_modularity = current_modularity;
-                
-                for (int comm : neighbor_communities) {
-                    if (comm == current_community) continue;
-                    
-                    // Temporarily move node to this community
-                    int original_community = solution.community[node];
-                    solution.community[node] = comm;
-                    
-                    // Calculate new modularity
-                    double new_modularity = calculateModularity(solution);
-                    
-                    // If better, remember this community
-                    if (new_modularity > best_modularity) {
-                        best_modularity = new_modularity;
-                        best_community = comm;
-                    }
-                    
-                    // Restore original community
-                    solution.community[node] = original_community;
-                }
-                
-                // If a better community was found, move the node
-                if (best_community != current_community) {
-                    solution.community[node] = best_community;
-                    solution.modularity = best_modularity;
-                    improved = true;
-                }
-            }
-        }
-        
         return solution;
     }
     
@@ -583,7 +523,6 @@ public:
         
         for (int iter = 0; iter < max_iterations; iter++) {
             std::vector<Solution> ant_solutions(num_ants);
-            
             // Each ant constructs a solution
             for (int ant = 0; ant < num_ants; ant++) {
                 ant_solutions[ant] = constructSolution(ant);
@@ -598,18 +537,18 @@ public:
             updatePheromones(ant_solutions);
             
             // Print progress every 10 iterations or at the end
-            if (iter % 1 == 0 || iter == max_iterations - 1) {
-                // Convert the current best solution to community format
-                auto communities = convertToCommunityMap(best_solution);
+            // if (iter % 10 == 0 || iter == max_iterations - 1) {
+            //     // Convert the current best solution to community format
+            //     auto communities = convertToCommunityMap(best_solution);
                 
-                std::cout << "Iteration " << iter << ": " 
-                          << communities.size() << " communities, "
-                          << "modularity = " << best_solution.modularity << std::endl;
+            //     std::cout << "Iteration " << iter << ": " 
+            //               << communities.size() << " communities, "
+            //               << "modularity = " << best_solution.modularity << std::endl;
                 
-                if (iter % 50 == 0) {
-                    printPheromoneStats();
-                }
-            }
+            //     if (iter % 50 == 0) {
+            //         printPheromoneStats();
+            //     }
+            // }
         }
         
         // Final result
@@ -737,6 +676,14 @@ Graph loadFootballGraph() {
     return graph;
 }
 
+Graph loadDBLPGraph() {
+    Graph graph;
+    std::string filename = "datasets/DBLP/com-dblp.ungraph.txt";
+    
+    graph.loadFromFile(filename);
+    return graph;
+}
+
 int main(int argc, char* argv[]) {
     // Parse command line arguments
     int num_ants = 30;
@@ -756,6 +703,8 @@ int main(int argc, char* argv[]) {
     // Load graph
     std::cout << "Loading graph..." << std::endl;
     Graph graph = loadFootballGraph();
+
+    std::cout<<"Graph loaded--\n";
     
     // Create ACO algorithm
     NodeCommunityACO aco(graph, num_ants, num_iterations, alpha, beta, rho, q0);
