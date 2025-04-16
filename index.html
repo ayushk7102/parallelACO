@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Project Proposal</title>
+    <style>
+        .simple-nav a {
+            margin-right: 15px;
+            text-decoration: none;
+            color: #555;
+            font-weight: 500;
+        }
+        
+        .simple-nav a.active {
+            color: #007bff;
+            border-bottom: 2px solid #007bff;
+        }
+        
+        .simple-nav a:hover {
+            color: #007bff;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        h1, h2, h3 {
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+        
+        h1 {
+            font-size: 2em;
+            border-bottom: 1px solid #eaecef;
+            padding-bottom: 0.3em;
+        }
+        
+        h2 {
+            font-size: 1.5em;
+            border-bottom: 1px solid #eaecef;
+            padding-bottom: 0.3em;
+        }
+        
+        h3 {
+            font-size: 1.25em;
+        }
+        
+        p {
+            margin-bottom: 16px;
+        }
+        
+        ul, ol {
+            padding-left: 2em;
+            margin-bottom: 16px;
+        }
+        
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-bottom: 16px;
+        }
+        
+        table, th, td {
+            border: 1px solid #dfe2e5;
+        }
+        
+        th, td {
+            padding: 8px 16px;
+            text-align: left;
+        }
+        
+        th {
+            background-color: #f6f8fa;
+            font-weight: 600;
+        }
+        
+        code {
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            background-color: rgba(27, 31, 35, 0.05);
+            padding: 0.2em 0.4em;
+            border-radius: 3px;
+        }
+        
+        pre {
+            background-color: #f6f8fa;
+            border-radius: 3px;
+            padding: 16px;
+            overflow: auto;
+        }
+        
+        blockquote {
+            margin: 0;
+            padding: 0 1em;
+            color: #6a737d;
+            border-left: 0.25em solid #dfe2e5;
+        }
+        
+        strong {
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="simple-nav">
+        <a href="#" class="active">Project Proposal</a>
+        <a href="milestone.html">Milestone Report</a>
+        <a href="final.html">Final Report</a>
+
+    </div>
+    <h1>Parallelized Community Detection in Graphs via Ant Colony Optimization</h1>
+    <p><strong>Team Members:</strong> Naveen Shenoy (naveensh), Ayush Kumar (ayushkum) </p>
+    
+    <p><strong>URL:</strong> <a href="https://www.andrew.cmu.edu/user/ayushkum/parallelACO/">https://www.andrew.cmu.edu/user/ayushkum/parallelACO/</a></p>
+    
+    <h2>Summary</h2>
+    <p>We propose to parallelize community detection via Ant Colony Optimization (ACO) on large graphs using OpenMP and MPI.</p>
+    
+    <h2>Background</h2>
+    <p>Graph community detection involves finding groups of nodes in a graph that are more densely connected to nodes within the group than outside the group, thus forming communities. Finding communities in large complex graphs is a computationally intensive task. Not knowing the size and number of communities beforehand adds to this complexity. Popular methods for graph community detection include the Girvan-Newman method and the Louvain method. However, the worst time-time complexities of these algorithms are cubic and quadratic respectively, and provide limited scope for parallelism. Ant Colony Optimization (ACO) is a swarm intelligence based algorithm and provides high scope for parallelism especially for graph community detection due to its support for community extraction.</p>
+    
+    <p>In ACO, ants traverse a graph and deposit pheromones on edges (changing edge weights dynamically) in a random walk. Nodes connected through larger pheromone edges have a higher chance of being traversed in a random walk. An iteration consists of random walks by multiple ants. Over multiple iterations, edges within a community would have higher pheromone values than those outside the community. After all iterations, communities are extracted from the graph with edges weighted with pheromone values. After ACO completes, community extraction on the graph with edges as pheromone values is performed. Considering each unprocessed node as the only node of a community, neighbor nodes are checked for inclusion into the community. A neighbor is included if its similarity with the community is above a certain threshold. Similarity is measured by pheromone values of edges of the neighbor node that connect with nodes already assigned to that community. Overlapping communities can exist, with a node being part of more than one community.</p>
+    
+    <p>The above algorithm consists of two phases, ACO and community extraction. For ACO, the scope of parallelism is across ants (multiple ants can walk in parallel) and within an ant (next node selection). In community extraction, the scope for parallelism is neighbor checking for expanding communities.</p>
+    
+    <h2>The Challenge</h2>
+    <p>Implementing a parallel version of ACO for community detection presents several challenges:</p>
+    
+    <ul>
+        <li>Ants deposit pheromones on edges of the graph. Pheromone values correspond to new edge weights and hence must be synchronized across walks between ants.</li>
+        <li>Updating the same weight simultaneously can lead to race conditions.</li>
+        <li>Using stale values of pheromones or not synchronizing the pheromone updates on edges across ants running on parallel threads can hurt algorithm performance as it can reduce the concentration or strength of pheromones over successive iterations leading to weaker communities.</li>
+        <li>Since walks are random, certain threads can get ants having to traverse longer paths, which can lead to a workload imbalance due to dynamic scheduling.</li>
+        <li>Some communities grow much faster than others, leading to uneven thread workloads.</li>
+        <li>Cache Efficiency: Graph-based algorithms are memory-bound, and random accesses can hurt cache locality.</li>
+    </ul>
+    
+    <h2>Resources</h2>
+    <p>We take inspiration from some of the following papers on the topic of community detection, ACO, and parallel graph processing:</p>
+    
+    <ul>
+        <li>GVE-LPA: Fast Label Propagation Algorithm (LPA) for Community Detection in Shared Memory Setting. Sahu, S. (2023). arXiv. https://doi.org/10.48550/arXiv.2312.08140</li>
+        <li>High Quality, Scalable and Parallel Community Detection for Large Real Graphs. (2014) Arnau Prat-Perez, et. al. International Conference on World Wide Web (WWW '14).</li>
+        <li>An efficient ant colony optimization framework for HPC environments (2022) P. Gonzalez, et. al. Applied Soft Computing 2022</li>
+        <li>Theoretically Efficient Parallel Graph Algorithms Can Be Fast and Scalable (2021), Laxman Dhulipala, Guy E. Blelloch, and Julian Shun. ACM Transactions on Parallel Computing, Vol. 8, No. 1, Article 4, March 2021</li>
+    </ul>
+    
+    <p>As for computational resources, we plan to use both the GHC machines as well as the PSC machines to run our algorithm. We will start writing our code from scratch, but we plan on referring to several existing implementations of ant colony optimization, such as P. González et. al (2022). We also plan to refer to previous work such as Arnau et. al (2014) to reference writing a parallel algorithm for community detection.</p>
+    
+    <h2>Goals and Deliverables</h2>
+    
+    <h3>Plan to Achieve</h3>
+    <ul>
+        <li>Implement scalable parallel versions of graph community detection using Ant Colony Optimization (ACO) using shared-memory multiprocessing</li>
+        <li>Analyze the 'quality' of community detection in the parallel case, using objective metrics from graph theory such as modularity, conductance.</li>
+        <li>Study the effect of colony size, synchronization intervals, traversal length, pheromone count and other optimization parameters on community quality in a parallel setting.</li>
+        <li>Conduct analyses by parameter-tuning our parallel algorithm to maximize community quality while ensuring optimal performance</li>
+        <li>Test on small-to-medium size graph datasets such as web-reddit (100k nodes) as well as graphs of larger scale, including datasets such as web-flickr (2M+ nodes)</li>
+        <li>Develop a parallel community detection algorithm which achieves at least 75% modularity as the sequential case</li>
+    </ul>
+    
+    <h3>Hope to Achieve</h3>
+    <ul>
+        <li>Implement scalable parallel versions of graph community detection using Ant Colony Optimization (ACO) using message passing programming model with MPI. Analyze and benchmark performance again OpenMP version.</li>
+        <li>Compare parallel ACO and how it scales against parallel implementations of at least one classical community detection algorithm Label Propagation algorithm. (https://github.com/puzzlef/rak-communities-openmp)</li>
+        <li>Conduct performance evaluation on massive-scale graphs, such as ClueWeb09 (4 bn+ nodes)</li>
+    </ul>
+    
+    <h2>Platform Choice</h2>
+    <p>We plan to use C++ as the programming language and experiment with OpenMP and MPI for parallelism. Both MPI and OpenMP APIs provide support for C++. We will be using the GHC and PSC machines which already have the libraries for MPI installed, while OpenMP support is provided natively by g++ compilers. PSC would allow us to test our program on a larger number of cores.</p>
+    
+    <h2>Schedule</h2>
+    <table>
+        <tr>
+            <th>Week</th>
+            <th>Plan</th>
+        </tr>
+        <tr>
+            <td>3/24 - 3/30</td>
+            <td>
+                <ul>
+                    <li>Research and draft proposal</li>
+                    <li>Setup development environment</li>
+                    <li>Finalize datasets</li>
+                </ul>
+            </td>
+        </tr>
+        <tr>
+            <td>3/31 - 4/06</td>
+            <td>
+                <ul>
+                    <li>Finish sequential version of algorithm</li>
+                    <li>Implement initial metrics such as modularity</li>
+                    <li>Start parallel OpenMP Implementation</li>
+                </ul>
+            </td>
+        </tr>
+        <tr>
+            <td>4/07 - 4/13</td>
+            <td>
+                <ul>
+                    <li>Complete parallel version of the algorithm using OpenMP</li>
+                    <li>Benchmark and final optimal configuration</li>
+                </ul>
+            </td>
+        </tr>
+        <tr>
+            <td>4/14 - 4/20</td>
+            <td>
+                <ul>
+                    <li>Implement parallel version of the algorithm using MPI</li>
+                </ul>
+            </td>
+        </tr>
+        <tr>
+            <td>4/21 - 4/28</td>
+            <td>
+                <ul>
+                    <li>Finish MPI parallel version</li>
+                    <li>Final evaluation and result collection</li>
+                    <li>Drafting final report</li>
+                </ul>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
