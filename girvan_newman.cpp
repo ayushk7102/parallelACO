@@ -609,6 +609,7 @@ public:
                 std::cout << "New best solution found: " << bestCommunities.size() 
                          << " communities, modularity = " << bestModularity << std::endl;
             }
+            exit(0);
         }
         
         std::cout << "Community detection completed." << std::endl;
@@ -622,12 +623,19 @@ public:
 
 Graph loadTestGraph(){
     Graph graph;
-    std::string filename = "datasets/test_graph.gml";
+    std::string filename = "datasets/test/test_graph.gml";
     
     graph.loadFromFileGML(filename);
     return graph;
 }
 
+Graph loadFootballGraph(){
+    Graph graph;
+    std::string filename = "datasets/football/football.gml";
+    
+    graph.loadFromFileGML(filename);
+    return graph;
+}
 
 int main(int argc, char* argv[]) {
     int num_ants = 20;
@@ -643,6 +651,7 @@ int main(int argc, char* argv[]) {
     // Load graph
     std::cout << "Loading graph..." << std::endl;
     Graph graph = loadTestGraph();
+    //loadTestGraph();
     
     // Set up ACO parameters
     ACOParameters params;
