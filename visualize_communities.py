@@ -77,11 +77,11 @@ def visualize_network(G, communities):
     # Draw the network
     nx.draw(G, pos, 
             node_color=node_colors, 
-            node_size=80, 
+            node_size=2, 
             edge_color='gray', 
             width=0.5, 
             alpha=0.8,
-            with_labels=True,
+            with_labels=False,
             font_size=8)
     
     # Create a legend for communities
@@ -108,7 +108,7 @@ def visualize_network(G, communities):
 
 def main():
     # Filename for the network data
-    filename = "sequential_communities.txt"
+    filename = "mpi_communities.txt"
     
     # Read the network data
     adjacency_list, communities = read_network_data(filename)

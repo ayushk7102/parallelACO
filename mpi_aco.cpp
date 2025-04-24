@@ -30,16 +30,217 @@ public:
         numEdges++;
     }
     
-    // Similar loading methods as in your original code...
-    void loadFromFileGML(const std::string& filename) {
-        // Same implementation as your original code
+void loadSoftwareFromFileGML(const std::string& filename) {
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Failed to open file: " << filename << std::endl;
+        return;
     }
-    
-    void loadFromFile(const std::string& filename) {
-        // Same implementation as your original code
+    std::map<int, bool> nodes; // To keep track of nodes we've seen
+    int edgeCount = 0;
+    std::string line;
+    bool inGraph = false;
+    bool inNode = false;
+    bool inEdge = false;
+    int currentNodeId = -1;
+    int sourceNode = -1;
+    int targetNode = -1;
+    std::string token;
+    while (std::getline(file, line)) {
+        // Trim leading and trailing whitespace
+        line.erase(0, line.find_first_not_of(" \t"));
+        line.erase(line.find_last_not_of(" \t") + 1);
+        if (line.empty()) continue; // Skip empty lines
+        std::istringstream iss(line);
+        iss >> token;
+        // Parse GML format
+        if (token == "graph") {
+            inGraph = true;
+        } else if (token == "directed") {
+            // Handle directed graph property
+            int directed;
+            iss >> directed;
+            // You can store this information if needed
+        } else if (token == "node") {
+            inNode = true;
+            inEdge = false;
+        } else if (token == "edge") {
+            inNode = false;
+            inEdge = true;
+        } else if (token == "[") {
+            // Opening bracket, nothing specific to do
+            continue;
+        } else if (token == "]") {
+            // Closing bracket
+            if (inNode) {
+                // Just mark that we've left the node section
+                inNode = false;
+            } else if (inEdge) {
+                // Finish processing the current edge
+                if (sourceNode != -1 && targetNode != -1) {
+                    addEdge(sourceNode, targetNode);
+                    edgeCount++;
+                    sourceNode = -1;
+                    targetNode = -1;
+                }
+                inEdge = false;
+            } else if (inGraph) {
+                // End of graph
+                inGraph = false;
+            }
+        } else if (inNode && token == "id") {
+            // Parse node ID - assumes ID is on the same line
+            iss >> currentNodeId;
+            // Mark that we've seen this node
+            nodes[currentNodeId] = true;
+        } else if (inEdge && token == "source") {
+            // Parse edge source - assumes source is on the same line
+            iss >> sourceNode;
+        } else if (inEdge && token == "target") {
+            // Parse edge target - assumes target is on the same line
+            iss >> targetNode;
+        }
+        // Ignore other properties like _pos for now
+    }
+    file.close();
+    std::cout << "Graph loaded successfully from GML!" << std::endl;
+    std::cout << "Nodes: " << nodes.size() << ", Edges: " << edgeCount << std::endl;
+}
+
+    void loadFromFileGML(const std::string& filename) {
+        std::ifstream file(filename);
+        if (!file.is_open()) {
+            std::cerr << "Failed to open file: " << filename << std::endl;
+            return;
+        }
+
+        std::string line;
+        bool inGraph = false;
+        bool inNode = false;
+        bool inEdge = false;
+        int currentNodeId = -1;
+        int sourceNode = -1;
+        int targetNode = -1;
+        
+        while (std::getline(file, line)) {
+            // Trim leading and trailing whitespace
+            line.erase(0, line.find_first_not_of(" \t"));
+            if (line.empty()) continue; // Skip empty lines
+            
+            // Parse GML format
+            if (line == "graph") {
+                continue;
+            } else if (line == "[") {
+                if (!inGraph) {
+                    inGraph = true;
+                    continue;
+                } else if (!inNode && !inEdge && line == "[") {
+                    // This is the beginning of a node or edge block
+                    continue;
+                }
+            } else if (line == "]") {
+                if (inNode) {
+                    inNode = false;
+                    currentNodeId = -1;
+                } else if (inEdge) {
+                    inEdge = false;
+                    if (sourceNode != -1 && targetNode != -1) {
+                        addEdge(sourceNode, targetNode);
+                        sourceNode = -1;
+                        targetNode = -1;
+                    }
+                } else if (inGraph) {
+                    inGraph = false;
+                }
+                continue;
+            }
+            
+            if (!inGraph) continue;
+            
+            // Check for node definition
+            if (line == "node") {
+                inNode = true;
+                continue;
+            }
+            
+            // Check for edge definition
+            if (line == "edge") {
+                inEdge = true;
+                continue;
+            }
+            
+            // Parse node ID
+            if (inNode && line.find("id ") == 0) {
+                std::istringstream iss(line.substr(3));
+                iss >> currentNodeId;
+                continue;
+            }
+            
+            // Parse edge source
+            if (inEdge && line.find("source ") == 0) {
+                std::istringstream iss(line.substr(7));
+                iss >> sourceNode;
+                continue;
+            }
+            
+            // Parse edge target
+            if (inEdge && line.find("target ") == 0) {
+                std::istringstream iss(line.substr(7));
+                iss >> targetNode;
+                continue;
+            }
+        }
+        
+        file.close();
+        std::cout << "Graph loaded successfully from GML!" << std::endl;
+        std::cout << "Nodes: " << numNodes << ", Edges: " << numEdges / 2 << std::endl;
     }
 
-    int getNumNodes() const { return numNodes; }
+    void loadFromFile(const std::string& filename) {
+        std::ifstream file(filename);
+        if (!file.is_open()) {
+            std::cerr << "Failed to open file: " << filename << std::endl;
+            return;
+        }
+
+        std::string line;
+        bool headerProcessed = false;
+
+        while (std::getline(file, line)) {
+            // Skip comments and empty lines
+            if (line.empty() || line[0] == '#') {
+                // Try to extract metadata from comments
+                if (line.find("Nodes:") != std::string::npos && 
+                    line.find("Edges:") != std::string::npos) {
+                    // Parse the line to get number of nodes and edges
+                    std::istringstream iss(line);
+                    std::string token;
+                    iss >> token; // Skip "# DBLP"
+                    iss >> token >> numNodes; // "Nodes:" and number
+                    iss >> token >> numEdges; // "Edges:" and number
+                }
+                continue;
+            }
+
+            // Skip the header line
+            if (!headerProcessed) {
+                headerProcessed = true;
+                continue;
+            }
+
+            // Parse edge
+            std::istringstream iss(line);
+            int from, to;
+            if (iss >> from >> to) {
+                addEdge(from, to);
+            }
+        }
+
+        file.close();
+        std::cout << "Graph loaded successfully!" << std::endl;
+        std::cout << "Nodes: " << numNodes << ", Edges: " << numEdges / 2 << std::endl;
+        // Note: numEdges is divided by 2 because we count each edge twice (once in each direction)
+    }    int getNumNodes() const { return numNodes; }
     int getNumEdges() const { return numEdges / 2; }
     
     const std::unordered_map<int, std::vector<int>>& getAdjList() const {
@@ -758,7 +959,21 @@ void saveGraphWithCommunities(const Graph& graph, const std::unordered_map<int, 
     std::cout << "Graph with communities saved to: " << filename << std::endl;
 }
 
+Graph loadFootballGraph(){
+    Graph graph;
+    std::string filename = "datasets/football/football.gml";
+    
+    graph.loadFromFileGML(filename);
+    return graph;
+}
 
+Graph loadTestGraph(){
+    Graph graph;
+    std::string filename = "datasets/test/test_graph.gml";
+    
+    graph.loadFromFileGML(filename);
+    return graph;
+}
 // Main function with MPI initialization
 int main(int argc, char* argv[]) {
     // Initialize MPI environment
@@ -774,7 +989,7 @@ int main(int argc, char* argv[]) {
     double alpha = 1.0;
     double beta = 2.0;
     double rho = 0.1;
-    double q0 = 0.9;
+    double q0 = 0.75;
     int sync_frequency = 5;
     
     if (argc > 1) num_ants = std::stoi(argv[1]);
@@ -791,10 +1006,12 @@ int main(int argc, char* argv[]) {
     if (rank == 0) {
         std::cout << "Loading graph..." << std::endl;
         
-        // Choose which dataset to load (similar to original code)
-        graph.loadFromFileGML("datasets/football/football.gml");
+        // graph.loadFromFileGML("datasets/football/football.gml");
+        // graph.loadFromFileGML("datasets/test/test_graph.gml");
+        graph.loadSoftwareFromFileGML("datasets/software/jung-c.gml");
         // Alternative: graph.loadFromFile("datasets/DBLP/com-dblp.ungraph.txt");
-        
+        // graph = loadTestGraph();
+        // graph = loadFootballGraph();
         std::cout << "Graph loaded with " << graph.getNumNodes() << " nodes and " 
                   << graph.getNumEdges() << " edges" << std::endl;
     }
