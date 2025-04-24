@@ -650,9 +650,114 @@ public:
         }
     }
 };
+// Utility function to print communities
+void printCommunities(const std::unordered_map<int, std::set<int>>& communities) {
+    // Create a vector of communities sorted by size
+    std::vector<std::pair<int, std::set<int>>> sorted_communities;
+    for (const auto& pair : communities) {
+        sorted_communities.push_back(pair);
+    }
+    
+    std::sort(sorted_communities.begin(), sorted_communities.end(),
+              [](const auto& a, const auto& b) { return a.second.size() > b.second.size(); });
+    
+    std::cout << "Detected " << communities.size() << " communities:" << std::endl;
+    
+    // Print all communities, or top 10 if there are many
+    int count = 0;
+    for (const auto& pair : sorted_communities) {
+        std::cout << "Community " << pair.first << " (size: " << pair.second.size() << "): ";
+        
+        // Print first 10 nodes in each community
+        int node_count = 0;
+        for (int node : pair.second) {
+            if (node_count++ < 10) {
+                std::cout << node << " ";
+            } else {
+                break;
+            }
+        }
+        
+        if (pair.second.size() > 10) {
+            std::cout << "...";
+        }
+        
+        std::cout << std::endl;
+        
+        if (++count >= 10 && communities.size() > 10) {
+            std::cout << "... (" << (communities.size() - 10) << " more communities)" << std::endl;
+            break;
+        }
+    }
+}
 
-// Utility functions from your original code (printCommunities, saveCommunities, saveGraphWithCommunities)
-// ... (these remain the same)
+// Save community structure to file
+void saveCommunities(const std::unordered_map<int, std::set<int>>& communities, const std::string& filename) {
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Failed to open file for writing: " << filename << std::endl;
+        return;
+    }
+    
+    file << "# Community_ID Size Nodes" << std::endl;
+    for (const auto& pair : communities) {
+        file << pair.first << " " << pair.second.size() << " ";
+        for (int node : pair.second) {
+            file << node << " ";
+        }
+        file << std::endl;
+    }
+    
+    file.close();
+    std::cout << "Community structure saved to: " << filename << std::endl;
+}
+
+void saveGraphWithCommunities(const Graph& graph, const std::unordered_map<int, std::set<int>>& communities, const std::string& filename) {
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Failed to open file for writing: " << filename << std::endl;
+        return;
+    }
+    
+    // Create a mapping from node to community
+    std::unordered_map<int, int> node_to_community;
+    for (const auto& pair : communities) {
+        int community_id = pair.first;
+        for (int node : pair.second) {
+            node_to_community[node] = community_id;
+        }
+    }
+    
+    // Save adjacency list with community assignments
+    const auto& adj_list = graph.getAdjList();
+    
+    file << "Graph adjacency list:" << std::endl;
+    for (const auto& pair : adj_list) {
+        int node = pair.first;
+        file << node << " -> ";
+        for (int neighbor : pair.second) {
+            file << neighbor << " ";
+        }
+        file << std::endl;
+    }
+    
+    // Save community assignments
+    file << "# Community_ID Size Nodes" << std::endl;
+    for (const auto& pair : communities) {
+        int community_id = pair.first;
+        const auto& members = pair.second;
+        
+        file << community_id << " " << members.size() << " ";
+        for (int node : members) {
+            file << node << " ";
+        }
+        file << std::endl;
+    }
+    
+    file.close();
+    std::cout << "Graph with communities saved to: " << filename << std::endl;
+}
+
 
 // Main function with MPI initialization
 int main(int argc, char* argv[]) {
