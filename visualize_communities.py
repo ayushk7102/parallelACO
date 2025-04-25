@@ -108,7 +108,7 @@ def visualize_network(G, communities):
 
 def main():
     # Filename for the network data
-    filename = "sequential_communities.txt"
+    filename = "parallel_communities.txt"
     
     # Read the network data
     adjacency_list, communities = read_network_data(filename)
