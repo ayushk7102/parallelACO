@@ -1007,8 +1007,8 @@ int main(int argc, char* argv[]) {
         std::cout << "Loading graph..." << std::endl;
         
         // graph.loadFromFileGML("datasets/football/football.gml");
-        // graph.loadFromFileGML("datasets/test/test_graph.gml");
-        graph.loadSoftwareFromFileGML("datasets/software/jung-c.gml");
+        graph.loadSoftwareFromFileGML("datasets/metabolic/celegans_metabolic.gml");
+        // graph.loadSoftwareFromFileGML("datasets/software/jung-c.gml");
         // Alternative: graph.loadFromFile("datasets/DBLP/com-dblp.ungraph.txt");
         // graph = loadTestGraph();
         // graph = loadFootballGraph();
