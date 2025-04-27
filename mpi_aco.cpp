@@ -803,14 +803,18 @@ public:
             std::cout << "  - q0 (exploitation probability): " << q0 << std::endl;
             std::cout << "  - Sync frequency: " << sync_frequency << std::endl;
         }
-        
+        double computationTime = 0.0;
         for (int iter = 0; iter < max_iterations; iter++) {
             // Each process constructs solutions with its ants
             std::vector<Solution> ant_solutions(ants_per_process);
             
             for (int ant = 0; ant < ants_per_process; ant++) {
+                auto start_time = std::chrono::high_resolution_clock::now();
+
                 ant_solutions[ant] = constructSolution(ant);
-                
+                std::chrono::duration<double> elapsed = std::chrono::high_resolution_clock::now() - start_time;
+                computationTime += elapsed.count();
+
                 // Update local best solution if improved
                 if (ant_solutions[ant].modularity > best_local_solution.modularity) {
                     best_local_solution = ant_solutions[ant];
@@ -843,12 +847,14 @@ public:
         // Only rank 0 reports final results
         if (rank == 0) {
             auto communities = convertToCommunityMap(best_global_solution);
+            std::cout << "-----------------TOTAL COMPUTATION TIME = " << computationTime << " seconds "<<"\n";
             std::cout << "Final result: " << communities.size() 
                       << " communities, modularity = " << best_global_solution.modularity << std::endl;
             return communities;
         } else {
             return std::unordered_map<int, std::set<int>>();
         }
+        
     }
 };
 // Utility function to print communities
