@@ -1,4 +1,3 @@
-
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -313,6 +312,8 @@ private:
     double rho;       // Evaporation rate
     double q0;        // Probability of exploitation vs exploration
     int num_threads;  // Number of OpenMP threads
+    int chunk_size;   // Chunk size for dynamic scheduling
+    bool use_local_pheromones; // Use thread-local pheromone copies
     
     // Pheromone matrix: pheromone[node][community] = pheromone level
     std::unordered_map<int, std::unordered_map<int, double>> pheromones;
@@ -324,31 +325,33 @@ private:
     std::mt19937 rng;
     std::uniform_real_distribution<double> dist;
     
-    // Initialize pheromone values
+    // Initialize pheromone values with optimized approach
     void initializePheromones() {
         std::vector<int> nodes = graph.getNodeIDs();
         double initial_pheromone = 1.0 / nodes.size();
         std::cout << "Initialization started..." << std::endl;
         
-        // This can be parallelized
-        #pragma omp parallel for
+        // Calculate chunk size for better load balancing
+        const int CHUNK_SIZE = std::max(1, static_cast<int>(nodes.size() / (omp_get_max_threads() * 2)));
+        
+        // This can be parallelized with dynamic scheduling
+        #pragma omp parallel for schedule(dynamic, CHUNK_SIZE)
         for (size_t i = 0; i < nodes.size(); i++) {
             int node = nodes[i];
             
-            // Use an ordered map for thread safety
-            std::map<int, double> local_pheromones;
+            // Create a batch of pheromone values locally to reduce contention
+            std::unordered_map<int, double> local_pheromones;
             for (int possible_community : nodes) {
                 local_pheromones[possible_community] = initial_pheromone;
             }
             
-            // Update the global pheromone matrix in a thread-safe way
+            // Single critical section per node instead of per community
             #pragma omp critical (pheromone_init)
             {
-                for (const auto& pair : local_pheromones) {
-                    pheromones[node][pair.first] = pair.second;
-                }
+                pheromones[node] = std::move(local_pheromones);
             }
         }
+        
         std::cout << std::endl << "Initialization complete" << std::endl;
     }
     
@@ -396,7 +399,7 @@ private:
         return connections;
     }
     
-    // Construct a solution using ant colony principles with thread-local randomness
+    // Optimized solution construction with thread-local pheromone copies
     Solution constructSolution(int ant_id, ThreadLocalRandom& local_rng) {
         std::vector<int> nodes = graph.getNodeIDs();
         Solution solution(nodes);
@@ -407,6 +410,20 @@ private:
         
         // First ant uses initial solution, others construct new ones
         if (ant_id > 0) {
+            // Thread-local pheromone copy to reduce critical sections
+            std::unordered_map<int, std::unordered_map<int, double>> local_pheromones;
+            
+            // Only create local copy if the flag is set
+            if (use_local_pheromones) {
+                // Copy pheromones just once at the beginning
+                #pragma omp critical (pheromone_read_bulk)
+                {
+                    for (int node : nodes) {
+                        local_pheromones[node] = pheromones[node];
+                    }
+                }
+            }
+            
             // For each node, decide which community to join
             for (int node : nodes) {
                 // Get potential communities (start with all neighbors' communities)
@@ -428,11 +445,15 @@ private:
                     double best_value = 0.0;
                     
                     for (int comm : potential_communities) {
-                        // Pheromone level - thread-safe read
+                        // Pheromone level - use local copy if available
                         double pheromone;
-                        #pragma omp critical (pheromone_read)
-                        {
-                            pheromone = pheromones[node][comm];
+                        if (use_local_pheromones) {
+                            pheromone = local_pheromones[node][comm];
+                        } else {
+                            #pragma omp critical (pheromone_read)
+                            {
+                                pheromone = pheromones[node][comm];
+                            }
                         }
                         
                         // Heuristic: number of connections to community
@@ -458,11 +479,15 @@ private:
                     double total = 0.0;
                     
                     for (int comm : potential_communities) {
-                        // Pheromone level - thread-safe read
+                        // Pheromone level - use local copy if available
                         double pheromone;
-                        #pragma omp critical (pheromone_read)
-                        {
-                            pheromone = pheromones[node][comm];
+                        if (use_local_pheromones) {
+                            pheromone = local_pheromones[node][comm];
+                        } else {
+                            #pragma omp critical (pheromone_read)
+                            {
+                                pheromone = pheromones[node][comm];
+                            }
                         }
                         
                         // Heuristic: number of connections to community
@@ -515,138 +540,110 @@ private:
         return solution;
     }
     
-    // Local search to improve a solution - no changes needed here
-    Solution localSearch(Solution solution) {
-        const auto& adj_list = graph.getAdjList();
-        std::vector<int> nodes = graph.getNodeIDs();
-        bool improved = true;
-        
-        while (improved) {
-            improved = false;
-            
-            // Try to move each node to a better community
-            for (int node : nodes) {
-                int current_community = solution.community[node];
-                std::set<int> neighbor_communities;
-                neighbor_communities.insert(current_community);
-                
-                // Get communities of neighbors
-                if (adj_list.find(node) != adj_list.end()) {
-                    for (int neighbor : adj_list.at(node)) {
-                        neighbor_communities.insert(solution.community[neighbor]);
-                    }
-                }
-                
-                // Get current modularity
-                double current_modularity = calculateModularity(solution);
-                
-                // Try each neighboring community
-                int best_community = current_community;
-                double best_modularity = current_modularity;
-                
-                for (int comm : neighbor_communities) {
-                    if (comm == current_community) continue;
-                    
-                    // Temporarily move node to this community
-                    int original_community = solution.community[node];
-                    solution.community[node] = comm;
-                    
-                    // Calculate new modularity
-                    double new_modularity = calculateModularity(solution);
-                    
-                    // If better, remember this community
-                    if (new_modularity > best_modularity) {
-                        best_modularity = new_modularity;
-                        best_community = comm;
-                    }
-                    
-                    // Restore original community
-                    solution.community[node] = original_community;
-                }
-                
-                // If a better community was found, move the node
-                if (best_community != current_community) {
-                    solution.community[node] = best_community;
-                    solution.modularity = best_modularity;
-                    improved = true;
-                }
-            }
-        }
-        
-        return solution;
-    }
-    
-    // Update pheromone levels based on solutions
+    // Optimized pheromone update with reduced critical sections
     void updatePheromones(const std::vector<Solution>& solutions) {
-        // Evaporation - this can be parallelized
-        std::vector<int> node_keys;
+        // Get all node IDs first to avoid race conditions in key iteration
+        std::vector<int> all_nodes;
         for (const auto& pair : pheromones) {
-            node_keys.push_back(pair.first);
-        }
-
-        // Now parallelize over the vector of keys
-        #pragma omp parallel for
-        for (size_t i = 0; i < node_keys.size(); i++) {
-            int node = node_keys[i];
-            
-            #pragma omp critical (pheromone_update)
-            {
-                for (auto& comm_pair : pheromones[node]) {
-                    comm_pair.second *= (1.0 - rho);
-                }
-            }
+            all_nodes.push_back(pair.first);
         }
         
-        // Add new pheromones based on solution quality
-        for (const auto& solution : solutions) {
-            double delta = solution.modularity; // Use modularity as deposit amount
-            
-            // For each node-community assignment in the solution
-            for (const auto& pair : solution.community) {
-                int node = pair.first;
-                int comm = pair.second;
-                
-                // Add pheromone proportional to solution quality
-                #pragma omp critical (pheromone_update)
-                {
-                    pheromones[node][comm] += delta;
-                }
-            }
-        }
-        
-        // Normalize pheromone values to prevent extreme differences
-        double max_pheromone = 0.0;
+        // Get all community IDs that have pheromones
+        std::set<int> all_communities;
         for (const auto& node_map : pheromones) {
-            for (const auto& comm_val : node_map.second) {
-                max_pheromone = std::max(max_pheromone, comm_val.second);
+            for (const auto& comm_pair : node_map.second) {
+                all_communities.insert(comm_pair.first);
             }
         }
         
+        // STEP 1: Evaporation - parallelize over nodes
+        #pragma omp parallel for schedule(dynamic, chunk_size)
+        for (size_t i = 0; i < all_nodes.size(); i++) {
+            int node = all_nodes[i];
+            
+            // Create a thread-local copy to update
+            std::unordered_map<int, double> local_pheromones;
+            
+            // Copy current pheromones with evaporation applied
+            #pragma omp critical (pheromone_read)
+            {
+                for (const auto& comm_pair : pheromones[node]) {
+                    local_pheromones[comm_pair.first] = comm_pair.second * (1.0 - rho);
+                }
+            }
+            
+            // STEP 2: Add new pheromones from solutions (still thread-local)
+            for (const auto& solution : solutions) {
+                if (solution.community.find(node) != solution.community.end()) {
+                    int comm = solution.community.at(node);
+                    local_pheromones[comm] += solution.modularity;
+                }
+            }
+            
+            // STEP 3: Update global pheromones (single critical section per node)
+            #pragma omp critical (pheromone_write)
+            {
+                for (const auto& comm_pair : local_pheromones) {
+                    pheromones[node][comm_pair.first] = comm_pair.second;
+                }
+            }
+        }
+        
+        // Normalize pheromones - single parallel region with reduced critical sections
+        double max_pheromone = 0.0;
+        
+        // Find max pheromone value in parallel
+        #pragma omp parallel
+        {
+            double thread_max = 0.0;
+            
+            #pragma omp for nowait
+            for (size_t i = 0; i < all_nodes.size(); i++) {
+                int node = all_nodes[i];
+                for (const auto& comm_pair : pheromones[node]) {
+                    thread_max = std::max(thread_max, comm_pair.second);
+                }
+            }
+            
+            // Combine thread-local max values
+            #pragma omp critical (max_reduction)
+            {
+                max_pheromone = std::max(max_pheromone, thread_max);
+            }
+        }
+        
+        // If normalization needed, apply in parallel
         if (max_pheromone > 10.0) {
             double scale_factor = 5.0 / max_pheromone;
             
-            // Collect keys again (or reuse node_keys if they haven't changed)
-            #pragma omp parallel for
-            for (size_t i = 0; i < node_keys.size(); i++) {
-                int node = node_keys[i];
+            #pragma omp parallel for schedule(dynamic, chunk_size)
+            for (size_t i = 0; i < all_nodes.size(); i++) {
+                int node = all_nodes[i];
                 
-                #pragma omp critical (pheromone_update)
+                // Make local changes first
+                std::unordered_map<int, double> scaled_values;
+                for (const auto& comm_pair : pheromones[node]) {
+                    scaled_values[comm_pair.first] = comm_pair.second * scale_factor;
+                }
+                
+                // Single critical section per node
+                #pragma omp critical (pheromone_scale)
                 {
-                    for (auto& comm_pair : pheromones[node]) {
-                        comm_pair.second *= scale_factor;
+                    for (const auto& comm_pair : scaled_values) {
+                        pheromones[node][comm_pair.first] = comm_pair.second;
                     }
                 }
             }
         }
     }
     
-    // Calculate modularity of a solution - no changes needed here
+    // Calculate modularity of a solution - optimized with precalculated community degrees
     double calculateModularity(const Solution& solution) {
         const auto& adj_list = graph.getAdjList();
         double m = graph.getNumEdges(); // Total number of edges
         double q = 0.0;
         
-        // Calculate the sum of degrees for each community
+        // Pre-calculate all community degrees to avoid repeated computation
         std::unordered_map<int, double> community_degrees;
         for (const auto& pair : adj_list) {
             int node = pair.first;
@@ -715,9 +712,10 @@ private:
 public:
     ParallelNodeCommunityACO(const Graph& g, int ants = 20, int iterations = 100, 
                            double a = 1.0, double b = 2.0, double r = 0.1, double q = 0.9,
-                           int threads = 4)
+                           int threads = 4, int chunk = 1, bool local_pheromones = true)
         : graph(g), num_ants(ants), max_iterations(iterations),
           alpha(a), beta(b), rho(r), q0(q), num_threads(threads),
+          chunk_size(chunk), use_local_pheromones(local_pheromones),
           rng(std::random_device{}()), dist(0.0, 1.0) {
         
         // Set the number of OpenMP threads
@@ -729,7 +727,7 @@ public:
     }
     
     std::unordered_map<int, std::set<int>> run() {
-        std::cout << "Running Parallel Node-Community ACO with:" << std::endl;
+        std::cout << "Running Optimized Parallel Node-Community ACO with:" << std::endl;
         std::cout << "  - " << num_ants << " ants" << std::endl;
         std::cout << "  - " << max_iterations << " iterations" << std::endl;
         std::cout << "  - " << num_threads << " threads" << std::endl;
@@ -737,6 +735,8 @@ public:
         std::cout << "  - Beta (heuristic influence): " << beta << std::endl;
         std::cout << "  - Rho (evaporation rate): " << rho << std::endl;
         std::cout << "  - q0 (exploitation probability): " << q0 << std::endl;
+        std::cout << "  - Chunk size: " << chunk_size << std::endl;
+        std::cout << "  - Using local pheromones: " << (use_local_pheromones ? "yes" : "no") << std::endl;
         
         // Create thread-local random generators
         std::vector<ThreadLocalRandom> thread_rngs(num_threads);
@@ -744,15 +744,24 @@ public:
             thread_rngs[i] = ThreadLocalRandom(std::random_device{}() + i);
         }
         
+        auto total_start_time = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> total_construction_time(0);
+
         for (int iter = 0; iter < max_iterations; iter++) {
             std::vector<Solution> ant_solutions(num_ants);
+
+            auto construction_start_time = std::chrono::high_resolution_clock::now();
+
             
-            // Parallel solution construction
-            #pragma omp parallel for
+            // Parallel solution construction with dynamic scheduling for better load balancing
+            #pragma omp parallel for schedule(dynamic, chunk_size)
             for (int ant = 0; ant < num_ants; ant++) {
                 // Get the thread ID for thread-local RNG
                 int thread_id = omp_get_thread_num();
                 ant_solutions[ant] = constructSolution(ant, thread_rngs[thread_id]);
+                
+                // Local search to improve solution - optional, can be disabled for speed
+                // ant_solutions[ant] = localSearch(ant_solutions[ant]);
                 
                 // Update best solution if improved - needs to be thread-safe
                 #pragma omp critical (best_solution)
@@ -762,23 +771,21 @@ public:
                     }
                 }
             }
+
+            auto construction_end_time = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> construction_elapsed = construction_end_time - construction_start_time;
+            total_construction_time += construction_elapsed;
             
             // Update pheromones based on solutions
             updatePheromones(ant_solutions);
-            
-            // Print progress every iteration
-            // auto communities = convertToCommunityMap(best_solution);
-            // if (iter % 10 == 0 or iter == max_iterations - 1) {
-            //     std::cout << "Iteration " << iter << ": " 
-            //                         << communities.size() << " communities, "
-            //                         << "modularity = " << best_solution.modularity << std::endl;
-            // }
-            
-            // if (iter % 10 == 0) {
-            //     printPheromoneStats();
-            // }
+
+            std::cout<<"Iteration "<<iter<<" done\n"<<std::endl;
         }
-        
+
+        auto total_end_time = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> total_elapsed = total_end_time - total_start_time;
+
+        std::cout << "\nTotal solution construction time: " << total_construction_time.count()  << std::endl;
         // Final result
         auto communities = convertToCommunityMap(best_solution);
         std::cout << "Final result: " << communities.size() 
@@ -930,6 +937,8 @@ int main(int argc, char* argv[]) {
     double rho = 0.1;
     double q0 = 0.9;
     int num_threads = omp_get_max_threads(); // Default to max available threads
+    int chunk_size = 1; // Default chunk size for dynamic scheduling
+    bool use_local_pheromones = true; // Default to using thread-local pheromones
     
     if (argc > 1) num_ants = std::stoi(argv[1]);
     if (argc > 2) num_iterations = std::stoi(argv[2]);
@@ -938,6 +947,8 @@ int main(int argc, char* argv[]) {
     if (argc > 5) rho = std::stod(argv[5]);
     if (argc > 6) q0 = std::stod(argv[6]);
     if (argc > 7) num_threads = std::stoi(argv[7]);
+    if (argc > 8) chunk_size = std::stoi(argv[8]);
+    if (argc > 9) use_local_pheromones = std::stoi(argv[9]) > 0;
     
     // Load graph
     std::cout << "Loading graph..." << std::endl;
@@ -952,8 +963,9 @@ int main(int argc, char* argv[]) {
     }
     std::cout << "Using " << omp_get_max_threads() << " threads" << std::endl;
     
-    // Create parallel ACO algorithm
-    ParallelNodeCommunityACO aco(graph, num_ants, num_iterations, alpha, beta, rho, q0, num_threads);
+    // Create parallel ACO algorithm with optimized parameters
+    ParallelNodeCommunityACO aco(graph, num_ants, num_iterations, alpha, beta, rho, q0, 
+                                num_threads, chunk_size, use_local_pheromones);
     
     // Get start time
     auto start_time = std::chrono::high_resolution_clock::now();
@@ -965,14 +977,14 @@ int main(int argc, char* argv[]) {
     auto end_time = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed = end_time - start_time;
     
-    std::cout << "\nParallel Node-Community ACO completed in " 
+    std::cout << "\nOptimized Parallel Node-Community ACO completed in " 
               << elapsed.count() << " seconds" << std::endl;
     
     // Print communities
     printCommunities(communities);
     
     // Save results
-    saveGraphWithCommunities(graph, communities, "parallel_communities.txt");
+    saveGraphWithCommunities(graph, communities, "optimized_parallel_communities.txt");
     
     return 0;
 }
