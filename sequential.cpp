@@ -645,6 +645,307 @@ public:
     }
 };
 
+class GirvanNewman {
+private:
+    const Graph& graph;
+    
+    // Calculate betweenness of all edges in the graph
+    std::map<std::pair<int, int>, double> calculateEdgeBetweenness() {
+        std::map<std::pair<int, int>, double> betweenness;
+        std::vector<int> nodes = graph.getNodeIDs();
+        const auto& adjList = graph.getAdjList();
+        
+        // Initialize betweenness values to 0
+        for (const auto& pair : adjList) {
+            int node = pair.first;
+            for (int neighbor : pair.second) {
+                if (node < neighbor) { // Count each edge only once
+                    betweenness[{node, neighbor}] = 0.0;
+                }
+            }
+        }
+        
+        // For each node as source
+        for (int source : nodes) {
+            // BFS to calculate shortest paths
+            std::queue<int> q;
+            std::map<int, int> distance;
+            std::map<int, double> pathCount;
+            std::map<int, std::vector<int>> predecessors;
+            
+            // Initialize
+            for (int node : nodes) {
+                distance[node] = -1;
+                pathCount[node] = 0.0;
+            }
+            
+            distance[source] = 0;
+            pathCount[source] = 1.0;
+            q.push(source);
+            
+            // BFS phase
+            while (!q.empty()) {
+                int current = q.front();
+                q.pop();
+                
+                // Process neighbors
+                for (int neighbor : adjList.at(current)) {
+                    // If not visited yet
+                    if (distance[neighbor] == -1) {
+                        distance[neighbor] = distance[current] + 1;
+                        q.push(neighbor);
+                    }
+                    
+                    // If this neighbor is further away, it's on a shortest path
+                    if (distance[neighbor] == distance[current] + 1) {
+                        pathCount[neighbor] += pathCount[current];
+                        predecessors[neighbor].push_back(current);
+                    }
+                }
+            }
+            
+            // Calculate edge betweenness
+            std::map<int, double> nodeDependency;
+            for (int node : nodes) {
+                nodeDependency[node] = 0.0;
+            }
+            
+            // Visit nodes in order of decreasing distance from source
+            std::vector<int> stack;
+            for (int node : nodes) {
+                if (node != source && distance[node] != -1) {
+                    stack.push_back(node);
+                }
+            }
+            
+            // Sort by distance (decreasing)
+            std::sort(stack.begin(), stack.end(), [&distance](int a, int b) {
+                return distance[a] > distance[b];
+            });
+            
+            // Process nodes in order
+            for (int node : stack) {
+                // Each predecessor gets credit proportional to the number of paths
+                for (int pred : predecessors[node]) {
+                    double edgeCredit = (pathCount[pred] / pathCount[node]) * (1.0 + nodeDependency[node]);
+                    
+                    // Add to edge betweenness (ensure canonical edge ordering)
+                    if (pred < node) {
+                        betweenness[{pred, node}] += edgeCredit;
+                    } else {
+                        betweenness[{node, pred}] += edgeCredit;
+                    }
+                    
+                    nodeDependency[pred] += edgeCredit;
+                }
+            }
+        }
+        
+        return betweenness;
+    }
+    
+    // Find connected components in a graph
+    std::vector<std::set<int>> findConnectedComponents(
+            const std::unordered_map<int, std::vector<int>>& currentGraph) {
+        std::vector<std::set<int>> components;
+        std::set<int> visited;
+        
+        // Get all nodes
+        std::vector<int> nodes;
+        for (const auto& pair : currentGraph) {
+            nodes.push_back(pair.first);
+        }
+        
+        // Find components using BFS
+        for (int node : nodes) {
+            if (visited.find(node) == visited.end()) {
+                // Start a new component
+                std::set<int> component;
+                std::queue<int> q;
+                
+                q.push(node);
+                visited.insert(node);
+                component.insert(node);
+                
+                while (!q.empty()) {
+                    int current = q.front();
+                    q.pop();
+                    
+                    // Check all neighbors
+                    if (currentGraph.find(current) != currentGraph.end()) {
+                        for (int neighbor : currentGraph.at(current)) {
+                            if (visited.find(neighbor) == visited.end()) {
+                                visited.insert(neighbor);
+                                component.insert(neighbor);
+                                q.push(neighbor);
+                            }
+                        }
+                    }
+                }
+                
+                components.push_back(component);
+            }
+        }
+        
+        return components;
+    }
+    
+    // Calculate modularity for a given community assignment
+    double calculateModularity(const std::vector<std::set<int>>& communities) {
+        const auto& adjList = graph.getAdjList();
+        double m = graph.getNumEdges(); // Total number of edges
+        double q = 0.0;
+        
+        // Create community lookup map for faster access
+        std::unordered_map<int, int> communityMap;
+        for (size_t i = 0; i < communities.size(); i++) {
+            for (int node : communities[i]) {
+                communityMap[node] = i;
+            }
+        }
+        
+        // For each edge
+        for (const auto& pair : adjList) {
+            int i = pair.first;
+            
+            if (communityMap.find(i) == communityMap.end()) {
+                continue;
+            }
+            
+            int c_i = communityMap[i];
+            
+            for (int j : pair.second) {
+                // Process each edge once (for undirected graph)
+                if (i < j) {
+                    if (communityMap.find(j) == communityMap.end()) {
+                        continue;
+                    }
+                    
+                    int c_j = communityMap[j];
+                    
+                    // Same community contribution
+                    if (c_i == c_j) {
+                        double expected = (pair.second.size() * adjList.at(j).size()) / (2.0 * m);
+                        q += 1.0 - expected;
+                    }
+                }
+            }
+        }
+        
+        q /= (2.0 * m);
+        return q;
+    }
+
+public:
+    GirvanNewman(const Graph& g) : graph(g) {}
+    
+    // Run the Girvan-Newman algorithm to find communities
+    std::unordered_map<int, std::set<int>> findCommunities(int maxRemovals = -1) {
+        auto start_time = std::chrono::high_resolution_clock::now();
+        std::cout << "Running Girvan-Newman algorithm..." << std::endl;
+        
+        // Make a copy of the graph to work with
+        std::unordered_map<int, std::vector<int>> currentGraph = graph.getAdjList();
+        
+        // Track the best community structure found
+        std::vector<std::set<int>> bestCommunities;
+        double bestModularity = -1.0;
+        int edgesRemoved = 0;
+        
+        // If maxRemovals is not specified, use estimated number
+        if (maxRemovals <= 0) {
+            maxRemovals = std::min(500, static_cast<int>(graph.getNumEdges() / 10));
+        }
+        
+        std::cout << "Will remove up to " << maxRemovals << " edges" << std::endl;
+        
+        // Store initial communities
+        bestCommunities = findConnectedComponents(currentGraph);
+        bestModularity = calculateModularity(bestCommunities);
+        
+        // Main loop - remove edges until desired number of communities or max removals
+        while (edgesRemoved < maxRemovals) {
+            // Calculate edge betweenness
+            auto betweenness = calculateEdgeBetweenness();
+            
+            // Find edge with highest betweenness
+            std::pair<int, int> maxEdge = {-1, -1};
+            double maxBetweenness = -1.0;
+            
+            for (const auto& pair : betweenness) {
+                if (pair.second > maxBetweenness) {
+                    maxBetweenness = pair.second;
+                    maxEdge = pair.first;
+                }
+            }
+            
+            if (maxEdge.first == -1 || maxEdge.second == -1) {
+                std::cout << "No more edges to remove" << std::endl;
+                break;
+            }
+            
+            // Remove the edge with highest betweenness
+            auto it = std::find(currentGraph[maxEdge.first].begin(), 
+                                currentGraph[maxEdge.first].end(), 
+                                maxEdge.second);
+            if (it != currentGraph[maxEdge.first].end()) {
+                currentGraph[maxEdge.first].erase(it);
+            }
+            
+            it = std::find(currentGraph[maxEdge.second].begin(), 
+                           currentGraph[maxEdge.second].end(), 
+                           maxEdge.first);
+            if (it != currentGraph[maxEdge.second].end()) {
+                currentGraph[maxEdge.second].erase(it);
+            }
+            
+            edgesRemoved++;
+            
+            // Check for new communities
+            auto communities = findConnectedComponents(currentGraph);
+            double modularity = calculateModularity(communities);
+            
+            // Update best communities if modularity improved
+            if (modularity > bestModularity) {
+                bestModularity = modularity;
+                bestCommunities = communities;
+                
+                std::cout << "Edge removed: " << maxEdge.first << "-" << maxEdge.second 
+                        << ", Edges removed: " << edgesRemoved
+                        << ", Communities: " << communities.size() 
+                        << ", Modularity: " << modularity << std::endl;
+            }
+            
+            // Optional: Stop if we have many communities or modularity is decreasing
+            if (communities.size() > std::sqrt(graph.getNumNodes())) {
+                std::cout << "Reached target number of communities" << std::endl;
+                break;
+            }
+            
+            // Log progress occasionally
+            if (edgesRemoved % 10 == 0) {
+                std::cout << "Edges removed: " << edgesRemoved << ", Current communities: " 
+                        << communities.size() << ", Best modularity: " << bestModularity << std::endl;
+            }
+        }
+        
+        // Convert the best communities to the required format
+        std::unordered_map<int, std::set<int>> result;
+        for (size_t i = 0; i < bestCommunities.size(); i++) {
+            result[i] = bestCommunities[i];
+        }
+        
+        auto end_time = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed = end_time - start_time;
+        
+        std::cout << "\nGirvan-Newman completed in " << elapsed.count() << " seconds" << std::endl;
+        std::cout << "Found " << bestCommunities.size() << " communities with modularity " 
+                << bestModularity << std::endl;
+        
+        return result;
+    }
+};
+
 // Utility function to print communities
 void printCommunities(const std::unordered_map<int, std::set<int>>& communities) {
     // Create a vector of communities sorted by size
@@ -821,6 +1122,30 @@ int main(int argc, char* argv[]) {
     
     // Save results
     saveGraphWithCommunities(graph, communities, "sequential_communities.txt");
+
+    // In main, after loading the graph but before running your ACO algorithm
+    std::cout << "\nRunning Girvan-Newman for comparison..." << std::endl;
+    GirvanNewman gn(graph);
+
+    // Get start time for Girvan-Newman
+    auto gn_start_time = std::chrono::high_resolution_clock::now();
+
+    // Find communities using Girvan-Newman
+    std::unordered_map<int, std::set<int>> gn_communities = gn.findCommunities();
+
+    // Get end time
+    auto gn_end_time = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> gn_elapsed = gn_end_time - gn_start_time;
+
+    std::cout << "\nGirvan-Newman completed in " 
+            << gn_elapsed.count() << " seconds" << std::endl;
+
+    // Print communities
+    std::cout << "\nGirvan-Newman communities:" << std::endl;
+    printCommunities(gn_communities);
+
+    // Save Girvan-Newman results
+    saveGraphWithCommunities(graph, gn_communities, "girvan_newman_communities.txt");
     
     return 0;
 }
