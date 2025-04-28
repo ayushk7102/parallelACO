@@ -32,6 +32,20 @@ def load_dblp_graph(filename):
     print(f"Nodes: {G.number_of_nodes()}, Edges: {G.number_of_edges()}")
     return G
 
+def load_graphml(filename):
+    """Load a graph from a GraphML file."""
+    try:
+        G = nx.read_graphml(filename)
+        print(f"GraphML loaded successfully!")
+        print(f"Nodes: {G.number_of_nodes()}, Edges: {G.number_of_edges()}")
+        return G
+    except FileNotFoundError:
+        print(f"Error: File {filename} not found")
+        return None
+    except Exception as e:
+        print(f"Error loading GraphML file: {str(e)}")
+        return None
+
 def detect_communities(G):
     """Detect communities using Louvain method."""
     print("Detecting communities...")
@@ -70,7 +84,8 @@ def visualize_communities(G, partition, max_nodes=100):
 
 def main():
     # Load the graph
-    filename = "datasets/DBLP/com-dblp.ungraph.txt"
+    # filename = "datasets/DBLP/com-dblp.ungraph.txt"
+    filename = "datasets/metabolic/celegans_metabolic.gml"
     G = load_dblp_graph(filename)
     
     if G is None:
