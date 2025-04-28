@@ -15,7 +15,7 @@
 
 class Graph {
 private:
-    std::unordered_map<int, std::vector<int>> adjList;
+    std::unordered_map<int, std::vector<int> > adjList;
     int numNodes;
     int numEdges;
 
@@ -28,6 +28,90 @@ public:
         
         numNodes = std::max(numNodes, std::max(from, to) + 1);
         numEdges++;
+    }
+
+    void loadSoftwareFromFileGML(const std::string& filename) {
+        std::ifstream file(filename);
+        if (!file.is_open()) {
+            std::cerr << "Failed to open file: " << filename << std::endl;
+            return;
+        }
+
+        // Assuming we have a data structure to track nodes
+        std::map<int, bool> nodes; // To keep track of nodes we've seen
+        int edgeCount = 0;
+        
+        std::string line;
+        bool inGraph = false;
+        bool inNode = false;
+        bool inEdge = false;
+        int currentNodeId = -1;
+        int sourceNode = -1;
+        int targetNode = -1;
+        std::string token;
+        
+        while (std::getline(file, line)) {
+            // Trim leading and trailing whitespace
+            line.erase(0, line.find_first_not_of(" \t"));
+            line.erase(line.find_last_not_of(" \t") + 1);
+            if (line.empty()) continue; // Skip empty lines
+            
+            std::istringstream iss(line);
+            iss >> token;
+            
+            // Parse GML format
+            if (token == "graph") {
+                inGraph = true;
+            } else if (token == "directed") {
+                // Handle directed graph property
+                int directed;
+                iss >> directed;
+                // You can store this information if needed
+            } else if (token == "node") {
+                inNode = true;
+                inEdge = false;
+            } else if (token == "edge") {
+                inNode = false;
+                inEdge = true;
+            } else if (token == "[") {
+                // Opening bracket, nothing specific to do
+                continue;
+            } else if (token == "]") {
+                // Closing bracket
+                if (inNode) {
+                    // Just mark that we've left the node section
+                    inNode = false;
+                } else if (inEdge) {
+                    // Finish processing the current edge
+                    if (sourceNode != -1 && targetNode != -1) {
+                        addEdge(sourceNode, targetNode);
+                        edgeCount++;
+                        sourceNode = -1;
+                        targetNode = -1;
+                    }
+                    inEdge = false;
+                } else if (inGraph) {
+                    // End of graph
+                    inGraph = false;
+                }
+            } else if (inNode && token == "id") {
+                // Parse node ID - assumes ID is on the same line
+                iss >> currentNodeId;
+                // Mark that we've seen this node
+                nodes[currentNodeId] = true;
+            } else if (inEdge && token == "source") {
+                // Parse edge source - assumes source is on the same line
+                iss >> sourceNode;
+            } else if (inEdge && token == "target") {
+                // Parse edge target - assumes target is on the same line
+                iss >> targetNode;
+            }
+            // Ignore other properties like _pos for now
+        }
+        
+        file.close();
+        std::cout << "Graph loaded successfully from GML!" << std::endl;
+        std::cout << "Nodes: " << nodes.size() << ", Edges: " << edgeCount << std::endl;
     }
 
     void loadFromFileGML(const std::string& filename) {
@@ -167,7 +251,7 @@ public:
     int getNumNodes() const { return numNodes; }
     int getNumEdges() const { return numEdges / 2; }
     
-    const std::unordered_map<int, std::vector<int>>& getAdjList() const {
+    const std::unordered_map<int, std::vector<int> >& getAdjList() const {
         return adjList;
     }
     
@@ -537,18 +621,19 @@ public:
             updatePheromones(ant_solutions);
             
             // Print progress every 10 iterations or at the end
-            // if (iter % 10 == 0 || iter == max_iterations - 1) {
-            //     // Convert the current best solution to community format
-            //     auto communities = convertToCommunityMap(best_solution);
+            if (iter % 10 == 0 || iter == max_iterations - 1) {
+                // Convert the current best solution to community format
+                // auto communities = convertToCommunityMap(best_solution);
                 
-            //     std::cout << "Iteration " << iter << ": " 
-            //               << communities.size() << " communities, "
-            //               << "modularity = " << best_solution.modularity << std::endl;
+                // std::cout << "Iteration " << iter << ": " 
+                //           << communities.size() << " communities, "
+                //           << "modularity = " << best_solution.modularity << std::endl;
                 
-            //     if (iter % 50 == 0) {
-            //         printPheromoneStats();
-            //     }
-            // }
+                // if (iter % 50 == 0) {
+                //     printPheromoneStats();
+                // }
+                std::cout<<iter<<std::endl;
+            }
         }
         
         // Final result
@@ -668,6 +753,15 @@ void saveGraphWithCommunities(const Graph& graph, const std::unordered_map<int, 
     std::cout << "Graph with communities saved to: " << filename << std::endl;
 }
 
+
+Graph loadSoftwareGraph() {
+    Graph graph;
+    std::string filename = "datasets/software/jung-c.gml";
+    
+    graph.loadSoftwareFromFileGML(filename);
+    return graph;
+}
+
 Graph loadFootballGraph() {
     Graph graph;
     std::string filename = "datasets/football/football.gml";
@@ -702,7 +796,7 @@ int main(int argc, char* argv[]) {
     
     // Load graph
     std::cout << "Loading graph..." << std::endl;
-    Graph graph = loadFootballGraph();
+    Graph graph = loadSoftwareGraph();
 
     std::cout<<"Graph loaded--\n";
     

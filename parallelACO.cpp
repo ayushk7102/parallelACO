@@ -911,7 +911,6 @@ Graph loadFootballGraph() {
     return graph;
 }
 
-
 Graph loadSoftwareGraph() {
     Graph graph;
     std::string filename = "datasets/software/jung-c.gml";
@@ -952,7 +951,7 @@ int main(int argc, char* argv[]) {
     
     // Load graph
     std::cout << "Loading graph..." << std::endl;
-    Graph graph = loadFootballGraph(); // Change to loadDBLPGraph() for DBLP dataset
+    Graph graph = loadSoftwareGraph(); // Change to loadDBLPGraph() for DBLP dataset
     
     std::cout << "Graph loaded with " << graph.getNumNodes() << " nodes and " 
               << graph.getNumEdges() << " edges" << std::endl;
