@@ -913,7 +913,7 @@ Graph loadFootballGraph() {
 
 Graph loadSoftwareGraph() {
     Graph graph;
-    std::string filename = "datasets/software/jung-c.gml";
+    std::string filename = "datasets/metabolic/celegans_metabolic.gml";
     
     graph.loadSoftwareFromFileGML(filename);
     return graph;
