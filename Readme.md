@@ -5,22 +5,22 @@
 ## TITLE:
 Parallelized Community Detection in Graphs via Ant Colony Optimization
 
-### Instructions to run:
+## Instructions to run:
 
-MPI:
-'''
+### MPI:
+```
 make
 mpirun -n <num_threads> ./mpi_aco <num_ants> <num_iterations> <alpha> <beta> <rho> <evaporation_ratio>
-'''
+```
 
-OpenMP:
-'''
+### OpenMP:
+```
 g++ parallelACO.cpp -o parallelACO -fopenmp
 ./parallelACO <num_ants> <num_iterations> <alpha> <beta> <rho> <evaporation_ratio>
-'''
+```
 
-Sequential:
-'''
+### Sequential:
+```
 g++ sequential.cpp -o sequential
 ./sequential
-'''
+```
