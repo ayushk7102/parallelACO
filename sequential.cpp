@@ -46,11 +46,9 @@ public:
         int targetNode = -1;
         
         while (std::getline(file, line)) {
-            // Trim leading and trailing whitespace
             line.erase(0, line.find_first_not_of(" \t"));
-            if (line.empty()) continue; // Skip empty lines
+            if (line.empty()) continue;
             
-            // Parse GML format
             if (line == "graph") {
                 continue;
             } else if (line == "[") {
@@ -58,7 +56,6 @@ public:
                     inGraph = true;
                     continue;
                 } else if (!inNode && !inEdge && line == "[") {
-                    // This is the beginning of a node or edge block
                     continue;
                 }
             } else if (line == "]") {
@@ -80,33 +77,28 @@ public:
             
             if (!inGraph) continue;
             
-            // Check for node definition
             if (line == "node") {
                 inNode = true;
                 continue;
             }
             
-            // Check for edge definition
             if (line == "edge") {
                 inEdge = true;
                 continue;
             }
             
-            // Parse node ID
             if (inNode && line.find("id ") == 0) {
                 std::istringstream iss(line.substr(3));
                 iss >> currentNodeId;
                 continue;
             }
             
-            // Parse edge source
             if (inEdge && line.find("source ") == 0) {
                 std::istringstream iss(line.substr(7));
                 iss >> sourceNode;
                 continue;
             }
             
-            // Parse edge target
             if (inEdge && line.find("target ") == 0) {
                 std::istringstream iss(line.substr(7));
                 iss >> targetNode;
@@ -130,28 +122,23 @@ public:
         bool headerProcessed = false;
 
         while (std::getline(file, line)) {
-            // Skip comments and empty lines
             if (line.empty() || line[0] == '#') {
-                // Try to extract metadata from comments
                 if (line.find("Nodes:") != std::string::npos && 
                     line.find("Edges:") != std::string::npos) {
-                    // Parse the line to get number of nodes and edges
                     std::istringstream iss(line);
                     std::string token;
-                    iss >> token; // Skip "# DBLP"
-                    iss >> token >> numNodes; // "Nodes:" and number
-                    iss >> token >> numEdges; // "Edges:" and number
+                    iss >> token;
+                    iss >> token >> numNodes; 
+                    iss >> token >> numEdges; 
                 }
                 continue;
             }
 
-            // Skip the header line
             if (!headerProcessed) {
                 headerProcessed = true;
                 continue;
             }
 
-            // Parse edge
             std::istringstream iss(line);
             int from, to;
             if (iss >> from >> to) {
@@ -171,7 +158,6 @@ public:
         return adjList;
     }
     
-    // Get all node IDs in the graph
     std::vector<int> getNodeIDs() const {
         std::vector<int> nodes;
         for (const auto& pair : adjList) {
@@ -181,17 +167,15 @@ public:
     }
 };
 
-// Structure to represent a solution (community assignment)
 struct Solution {
-    std::unordered_map<int, int> community; // node_id -> community_id
+    std::unordered_map<int, int> community;
     double modularity;
     
     Solution() : modularity(0.0) {}
     
-    // Initialize solution with each node in its own community
     explicit Solution(const std::vector<int>& nodes) : modularity(0.0) {
         for (int node : nodes) {
-            community[node] = node; // Initially node ID is community ID
+            community[node] = node;
         }
     }
 };
@@ -206,17 +190,13 @@ private:
     double rho;       // Evaporation rate
     double q0;        // Probability of exploitation vs exploration
     
-    // Pheromone matrix: pheromone[node][community] = pheromone level
     std::unordered_map<int, std::unordered_map<int, double>> pheromones;
     
-    // Best solution found so far
     Solution best_solution;
     
-    // Random number generator
     std::mt19937 rng;
     std::uniform_real_distribution<double> dist;
     
-    // Initialize pheromone values
     void initializePheromones() {
         std::vector<int> nodes = graph.getNodeIDs();
         double initial_pheromone = 1.0 / nodes.size();
@@ -224,13 +204,9 @@ private:
             for (int possible_community : nodes) {
                 pheromones[node][possible_community] = initial_pheromone;
             }
-            // if(node % 1000 == 0) {
-            //     std::cout<<"on node: "<<node<<"\n";
-            // }
         }
     }
     
-    // Print statistics about the pheromone matrix
     void printPheromoneStats() {
         double min_val = std::numeric_limits<double>::max();
         double max_val = 0.0;
@@ -255,7 +231,6 @@ private:
         std::cout << "  Total entries: " << count << std::endl;
     }
     
-    // Calculate how many connections node has to a given community
     int connectionsToCommunity(int node, int community_id, const Solution& solution) {
         const auto& adj_list = graph.getAdjList();
         
@@ -274,22 +249,17 @@ private:
         return connections;
     }
     
-    // Construct a solution using ant colony principles
     Solution constructSolution(int ant_id) {
         std::vector<int> nodes = graph.getNodeIDs();
         Solution solution(nodes);
         const auto& adj_list = graph.getAdjList();
         
-        // Shuffle nodes to process them in random order
         std::shuffle(nodes.begin(), nodes.end(), rng);
         
-        // First ant uses initial solution, others construct new ones
         if (ant_id > 0) {
-            // For each node, decide which community to join
             for (int node : nodes) {
-                // Get potential communities (start with all neighbors' communities)
                 std::set<int> potential_communities;
-                potential_communities.insert(node); // Own community is always an option
+                potential_communities.insert(node);
                 
                 if (adj_list.find(node) != adj_list.end()) {
                     for (int neighbor : adj_list.at(node)) {
@@ -297,7 +267,6 @@ private:
                     }
                 }
                 
-                // Decide whether to exploit or explore
                 double q = dist(rng);
                 
                 if (q < q0) {
@@ -306,14 +275,11 @@ private:
                     double best_value = 0.0;
                     
                     for (int comm : potential_communities) {
-                        // Pheromone level
                         double pheromone = pheromones[node][comm];
                         
-                        // Heuristic: number of connections to community
                         int connections = connectionsToCommunity(node, comm, solution);
                         double heuristic = std::max(0.1, static_cast<double>(connections));
                         
-                        // Combined value using ACO formula
                         double value = std::pow(pheromone, alpha) * std::pow(heuristic, beta);
                         
                         if (value > best_value) {
@@ -321,8 +287,6 @@ private:
                             best_community = comm;
                         }
                     }
-                    
-                    // Assign node to the best community
                     solution.community[node] = best_community;
                 }
                 else {
@@ -332,14 +296,9 @@ private:
                     double total = 0.0;
                     
                     for (int comm : potential_communities) {
-                        // Pheromone level
                         double pheromone = pheromones[node][comm];
-                        
-                        // Heuristic: number of connections to community
                         int connections = connectionsToCommunity(node, comm, solution);
                         double heuristic = std::max(0.1, static_cast<double>(connections));
-                        
-                        // Combined value using ACO formula
                         double value = std::pow(pheromone, alpha) * std::pow(heuristic, beta);
                         
                         communities.push_back(comm);
@@ -354,7 +313,6 @@ private:
                         }
                     }
                     else {
-                        // If all values are zero, use uniform distribution
                         for (auto& p : probabilities) {
                             p = 1.0 / probabilities.size();
                         }
@@ -373,21 +331,15 @@ private:
                         }
                     }
                     
-                    // Assign node to the selected community
                     solution.community[node] = selected_community;
                 }
             }
         }
-        
-        // Apply local search to improve the solution
-        // solution = localSearch(solution);
-        
-        // Calculate solution modularity
+
         solution.modularity = calculateModularity(solution);
         return solution;
     }
     
-    // Update pheromone levels based on solutions
     void updatePheromones(const std::vector<Solution>& solutions) {
         // Evaporation
         for (auto& node_map : pheromones) {
@@ -396,21 +348,17 @@ private:
             }
         }
         
-        // Add new pheromones based on solution quality
         for (const auto& solution : solutions) {
-            double delta = solution.modularity; // Use modularity as deposit amount
+            double delta = solution.modularity;
             
-            // For each node-community assignment in the solution
             for (const auto& pair : solution.community) {
                 int node = pair.first;
                 int comm = pair.second;
                 
-                // Add pheromone proportional to solution quality
                 pheromones[node][comm] += delta;
             }
         }
         
-        // Normalize pheromone values to prevent extreme differences
         double max_pheromone = 0.0;
         for (const auto& node_map : pheromones) {
             for (const auto& comm_val : node_map.second) {
@@ -427,20 +375,18 @@ private:
             }
         }
     }
-    
-    // Calculate modularity of a solution
+
     double calculateModularity(const Solution& solution) {
         const auto& adj_list = graph.getAdjList();
         double m = graph.getNumEdges(); // Total number of edges
         double q = 0.0;
         
-        // Calculate the sum of degrees for each community
         std::unordered_map<int, double> community_degrees;
         for (const auto& pair : adj_list) {
             int node = pair.first;
             
             if (solution.community.find(node) == solution.community.end()) {
-                continue; // Skip nodes not in solution
+                continue;
             }
             
             int comm = solution.community.at(node);
@@ -450,7 +396,6 @@ private:
             community_degrees[comm] += pair.second.size();
         }
         
-        // For each edge
         for (const auto& pair : adj_list) {
             int i = pair.first;
             
@@ -461,7 +406,6 @@ private:
             int c_i = solution.community.at(i);
             
             for (int j : pair.second) {
-                // Process each edge once (for undirected graph)
                 if (i < j) {
                     if (solution.community.find(j) == solution.community.end()) {
                         continue;
@@ -469,7 +413,6 @@ private:
                     
                     int c_j = solution.community.at(j);
                     
-                    // Same community contribution
                     if (c_i == c_j) {
                         double expected = (pair.second.size() * adj_list.at(j).size()) / (2.0 * m);
                         q += 1.0 - expected;
@@ -482,7 +425,6 @@ private:
         return q;
     }
     
-    // Convert solution to community map format
     std::unordered_map<int, std::set<int>> convertToCommunityMap(const Solution& solution) {
         std::unordered_map<int, std::set<int>> result;
         
@@ -523,17 +465,14 @@ public:
         
         for (int iter = 0; iter < max_iterations; iter++) {
             std::vector<Solution> ant_solutions(num_ants);
-            // Each ant constructs a solution
             for (int ant = 0; ant < num_ants; ant++) {
                 ant_solutions[ant] = constructSolution(ant);
                 
-                // Update best solution if improved
                 if (ant_solutions[ant].modularity > best_solution.modularity) {
                     best_solution = ant_solutions[ant];
                 }
             }
             
-            // Update pheromones based on solutions
             updatePheromones(ant_solutions);
             
             // Print progress every 10 iterations or at the end
@@ -544,14 +483,9 @@ public:
             //     std::cout << "Iteration " << iter << ": " 
             //               << communities.size() << " communities, "
             //               << "modularity = " << best_solution.modularity << std::endl;
-                
-            //     if (iter % 50 == 0) {
-            //         printPheromoneStats();
-            //     }
             // }
         }
         
-        // Final result
         auto communities = convertToCommunityMap(best_solution);
         std::cout << "Final result: " << communities.size() 
                   << " communities, modularity = " << best_solution.modularity << std::endl;
@@ -560,9 +494,7 @@ public:
     }
 };
 
-// Utility function to print communities
 void printCommunities(const std::unordered_map<int, std::set<int>>& communities) {
-    // Create a vector of communities sorted by size
     std::vector<std::pair<int, std::set<int>>> sorted_communities;
     for (const auto& pair : communities) {
         sorted_communities.push_back(pair);
@@ -573,12 +505,10 @@ void printCommunities(const std::unordered_map<int, std::set<int>>& communities)
     
     std::cout << "Detected " << communities.size() << " communities:" << std::endl;
     
-    // Print all communities, or top 10 if there are many
     int count = 0;
     for (const auto& pair : sorted_communities) {
         std::cout << "Community " << pair.first << " (size: " << pair.second.size() << "): ";
         
-        // Print first 10 nodes in each community
         int node_count = 0;
         for (int node : pair.second) {
             if (node_count++ < 10) {
@@ -601,7 +531,6 @@ void printCommunities(const std::unordered_map<int, std::set<int>>& communities)
     }
 }
 
-// Save community structure to file
 void saveCommunities(const std::unordered_map<int, std::set<int>>& communities, const std::string& filename) {
     std::ofstream file(filename);
     if (!file.is_open()) {
@@ -629,7 +558,6 @@ void saveGraphWithCommunities(const Graph& graph, const std::unordered_map<int, 
         return;
     }
     
-    // Create a mapping from node to community
     std::unordered_map<int, int> node_to_community;
     for (const auto& pair : communities) {
         int community_id = pair.first;
@@ -638,7 +566,6 @@ void saveGraphWithCommunities(const Graph& graph, const std::unordered_map<int, 
         }
     }
     
-    // Save adjacency list with community assignments
     const auto& adj_list = graph.getAdjList();
     
     file << "Graph adjacency list:" << std::endl;
@@ -651,7 +578,6 @@ void saveGraphWithCommunities(const Graph& graph, const std::unordered_map<int, 
         file << std::endl;
     }
     
-    // Save community assignments
     file << "# Community_ID Size Nodes" << std::endl;
     for (const auto& pair : communities) {
         int community_id = pair.first;
@@ -685,7 +611,6 @@ Graph loadDBLPGraph() {
 }
 
 int main(int argc, char* argv[]) {
-    // Parse command line arguments
     int num_ants = 30;
     int num_iterations = 200;
     double alpha = 1.0;
@@ -700,32 +625,25 @@ int main(int argc, char* argv[]) {
     if (argc > 5) rho = std::stod(argv[5]);
     if (argc > 6) q0 = std::stod(argv[6]);
     
-    // Load graph
     std::cout << "Loading graph..." << std::endl;
     Graph graph = loadFootballGraph();
 
     std::cout<<"Graph loaded--\n";
     
-    // Create ACO algorithm
     NodeCommunityACO aco(graph, num_ants, num_iterations, alpha, beta, rho, q0);
     
-    // Get start time
     auto start_time = std::chrono::high_resolution_clock::now();
     
-    // Run ACO
     std::unordered_map<int, std::set<int>> communities = aco.run();
     
-    // Get end time
     auto end_time = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> elapsed = end_time - start_time;
     
     std::cout << "\nNode-Community ACO completed in " 
               << elapsed.count() << " seconds" << std::endl;
     
-    // Print communities
     printCommunities(communities);
     
-    // Save results
     saveGraphWithCommunities(graph, communities, "sequential_communities.txt");
     
     return 0;
