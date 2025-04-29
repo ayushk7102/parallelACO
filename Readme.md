@@ -13,9 +13,9 @@ make
 mpirun -n <num_threads> ./mpi_aco <num_ants> <num_iterations> <alpha> <beta> <rho> <evaporation_ratio>
 
 OpenMP:
-g++ --std=c++17 parallelACO.cpp -o parallelACO
+g++ parallelACO.cpp -o parallelACO -fopenmp
 ./parallelACO <num_ants> <num_iterations> <alpha> <beta> <rho> <evaporation_ratio>
 
 Sequential:
-g++ --std=c++17 sequential.cpp -o sequential
+g++ sequential.cpp -o sequential
 ./sequential
